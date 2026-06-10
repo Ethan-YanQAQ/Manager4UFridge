@@ -1,0 +1,49 @@
+# 智能冰箱食材管理模块 - Phase_0 配置文件
+# 模拟 YOLO 推理 + IoU 前后帧对比 + 存取判定
+
+# YOLO 模型配置
+model:
+  type: "yolov8n"
+  weights: "models/yolov8s.pt"          # 预训练权重路径
+  imgsz: 640                              # 推理输入尺寸
+  conf_threshold: 0.25                    # 检测置信度阈值
+  iou_nms: 0.45                          # NMS IoU 阈值
+
+# IoU 存取判定
+tracking:
+  iou_match_threshold: 0.30              # 同类物体前后帧匹配 IoU 阈值
+  max_age_frames: 5                       # 暂时消失仍视为 still 的容忍帧数（暂未使用）
+
+# 食材类别映射（COCO 中与食物相关的类别）
+food_classes:
+  47: "apple"
+  49: "orange"
+  52: "banana"
+  51: "broccoli"
+  52: "carrot"
+  55: "orange"
+  57: "pizza"
+  58: "hot dog"
+  59: "sandwich"
+  60: "cake"
+  46: "carrot_alt"
+  41: "cup"
+  44: "bottle"
+  45: "bowl"
+  68: "cell phone"      # 非食物干扰
+  73: "book"            # 非食物干扰
+
+# 各食材腐坏天数参考阈值
+freshness:
+  apple: 14
+  banana: 5
+  orange: 10
+  broccoli: 5
+  carrot: 14
+  pizza: 3
+  hot_dog: 3
+  sandwich: 2
+  cake: 5
+  milk: 7
+  egg: 21
+  default: 7

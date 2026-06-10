@@ -1,0 +1,52 @@
+# ===== 编译产物 =====
+Debug/
+Release/
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.hex
+*.bin
+*.map
+*.list
+
+# ===== STM32CubeIDE =====
+.settings/
+.cproject
+.mxproject
+.project
+*.launch
+**/Drivers/CMSIS/
+
+# ===== Python =====
+**/__pycache__/
+*.pyc
+*.pyo
+
+# ===== 数据集 & 模型（大文件，不应入库）=====
+**/datasets/
+*.zip
+*.pt
+*.db
+*.sqlite
+Phase_0/data/
+
+# ===== 临时文件 =====
+{AEC0BD37-C609-48A0-B56B-389194DA71B1}.png
+
+# ===== 编辑器 / IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== 系统文件 =====
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ===== 本地配置 =====
+.claude/settings.local.json
+.deepcode/
