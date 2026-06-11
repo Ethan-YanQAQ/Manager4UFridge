@@ -19,3 +19,6 @@
 完成结构一，设计PCB电路板初稿
 完成功能一，模型训练并实战
 
+git add .                           # 加入暂存区
+git commit -m "描述你改了什么"        # 提交到本地
+git push                            # 推送到 GitHub
