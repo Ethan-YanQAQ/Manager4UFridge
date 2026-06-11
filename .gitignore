@@ -26,6 +26,7 @@ Release/
 
 # ===== 数据集 & 模型（大文件，不应入库）=====
 **/datasets/
+**/runs/
 *.zip
 *.pt
 *.db
