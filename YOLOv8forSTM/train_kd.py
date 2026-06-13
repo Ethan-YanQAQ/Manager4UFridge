@@ -23,6 +23,56 @@ from ultralytics import YOLO
 import argparse
 import sys
 import os
+import types as _types
+
+
+# ---- 模块级 KD loss 函数（通过 model._kd_* 属性传递状态） ----
+
+def _kd_loss(self, batch, preds=None):
+    """
+    KD loss — self 是 DetectionModel 实例。
+    model._kd_* 属性由 KDTrainer.set_model_attributes() 注入。
+    """
+    # 预计算学生 preds（避免 orig_loss_fn 内部重复前向）
+    if preds is None:
+        preds = self.forward(batch["img"])
+
+    # 验证 / warmup 时 preds 可能是 tuple（非 raw dict），走原始 loss 跳过 KD
+    if not isinstance(preds, dict):
+        return self._kd_orig_loss(batch, preds)
+
+    # 1) 原始检测损失
+    loss, loss_items = self._kd_orig_loss(batch, preds)
+
+    # 2) 教师前向（无梯度）
+    with torch.no_grad():
+        t_preds = self._kd_teacher(batch["img"])
+
+    # 3) 分类 KD：KL 散度
+    T = self._kd_temp
+    nc = self._kd_nc
+    s_scores = preds["scores"][:, :nc, :]
+    t_scores = t_preds["scores"][:, :nc, :]
+
+    s_log_prob = F.log_softmax(s_scores / T, dim=1)
+    t_prob = F.softmax(t_scores / T, dim=1)
+    kd_cls = F.kl_div(s_log_prob, t_prob, reduction="mean") * (T * T)
+
+    # 4) 框回归 KD：MSE
+    kd_box = F.mse_loss(preds["boxes"], t_preds["boxes"])
+
+    # 5) 总损失
+    kd_total = self._kd_cls_w * kd_cls + self._kd_box_w * kd_box
+    loss = loss + kd_total
+
+    # 追加 KD 项到 loss_items（日志用）
+    kd_items = torch.tensor(
+        [kd_cls.detach(), kd_box.detach(), kd_total.detach()],
+        device=loss.device,
+    )
+    loss_items = torch.cat([loss_items, kd_items])
+
+    return loss, loss_items
 
 
 class KDTrainer(DetectionTrainer):
@@ -40,14 +90,11 @@ class KDTrainer(DetectionTrainer):
     """
 
     def __init__(self, cfg=DEFAULT_CFG_DICT, overrides=None, _callbacks=None):
-        # 从 overrides 中提取 KD 专属参数（ultralytics 合并 kwargs → overrides）
         overrides = dict(overrides) if overrides else {}
         self.teacher_weights = overrides.pop("teacher_weights", None)
         self.kd_temp = float(overrides.pop("kd_temp", 3.0))
         self.kd_cls_w = float(overrides.pop("kd_cls_weight", 0.5))
         self.kd_box_w = float(overrides.pop("kd_box_weight", 0.3))
-        self.teacher = None
-        self._orig_loss_fn = None
         super().__init__(cfg=cfg, overrides=overrides, _callbacks=_callbacks)
 
     def set_model_attributes(self):
@@ -59,76 +106,26 @@ class KDTrainer(DetectionTrainer):
 
         # -- 加载教师模型 --
         teacher_wrapper = YOLO(self.teacher_weights, task='detect')
-        self.teacher = teacher_wrapper.model
-
-        # 处理 nc 不匹配：取较小者，训练时自动截断
-        t_nc = self.teacher.nc
-        s_nc = self.model.nc
-        if t_nc != s_nc:
-            print(f"[KD] 教师 nc={t_nc}，学生 nc={s_nc}，将截断至 min={min(t_nc, s_nc)}")
-        self._kd_nc = min(t_nc, s_nc)
-
-        # 冻结教师
-        self.teacher.eval()
-        for p in self.teacher.parameters():
+        teacher = teacher_wrapper.model
+        teacher.eval()
+        for p in teacher.parameters():
             p.requires_grad_(False)
-        self.teacher.to(self.device)
 
-        # 保存原始 loss，注入 KD loss
-        self._orig_loss_fn = self.model.loss
-        self.model.loss = self._make_kd_loss()
+        # -- 将 KD 状态存入 model 实例 --
+        self.model._kd_teacher = teacher.to(self.device)
+        self.model._kd_nc = min(teacher.nc, self.model.nc)
+        self.model._kd_temp = self.kd_temp
+        self.model._kd_cls_w = self.kd_cls_w
+        self.model._kd_box_w = self.kd_box_w
+        self.model._kd_orig_loss = self.model.loss
 
+        # -- 用 MethodType 替换 model.loss（正确绑定 self） --
+        self.model.loss = _types.MethodType(_kd_loss, self.model)
+
+        if teacher.nc != self.model.nc:
+            print(f"[KD] 教师 nc={teacher.nc}，学生 nc={self.model.nc}，截断至 {self.model._kd_nc}")
         print(f"[KD] 教师模型已加载: {os.path.basename(self.teacher_weights)}")
         print(f"[KD]   T={self.kd_temp}  cls_w={self.kd_cls_w}  box_w={self.kd_box_w}")
-
-    def _make_kd_loss(self):
-        """构建 KD loss 闭包，捕获教师和超参数。"""
-        teacher = self.teacher
-        kd_temp = self.kd_temp
-        kd_cls_w = self.kd_cls_w
-        kd_box_w = self.kd_box_w
-        orig_loss_fn = self._orig_loss_fn
-        kd_nc = self._kd_nc
-        device = self.device
-
-        def kd_loss(model_self, batch, preds=None):
-            # 预计算学生 preds（避免 orig_loss_fn 内部重复前向）
-            if preds is None:
-                preds = model_self.forward(batch["img"])
-
-            # 1) 原始检测损失
-            loss, loss_items = orig_loss_fn(batch, preds)
-
-            # 2) 教师前向（无梯度）
-            with torch.no_grad():
-                t_preds = teacher(batch["img"])
-
-            # 3) 分类 KD：KL 散度（截断 nc 以对齐）
-            T = kd_temp
-            s_scores = preds["scores"][:, :kd_nc, :]
-            t_scores = t_preds["scores"][:, :kd_nc, :]
-
-            s_log_prob = F.log_softmax(s_scores / T, dim=1)
-            t_prob = F.softmax(t_scores / T, dim=1)
-            kd_cls = F.kl_div(s_log_prob, t_prob, reduction="batchmean") * (T * T)
-
-            # 4) 框回归 KD：MSE
-            kd_box = F.mse_loss(preds["boxes"], t_preds["boxes"])
-
-            # 5) 总损失
-            kd_total = kd_cls_w * kd_cls + kd_box_w * kd_box
-            loss = loss + kd_total
-
-            # 追加 KD 项到 loss_items（日志用）
-            kd_items = torch.tensor(
-                [kd_cls.detach(), kd_box.detach(), kd_total.detach()],
-                device=device,
-            )
-            loss_items = torch.cat([loss_items, kd_items])
-
-            return loss, loss_items
-
-        return kd_loss
 
 
 def run_stage1():
@@ -169,14 +166,18 @@ def run_stage2(teacher_path):
     results = model.train(
         data="datasets/fridge_36/dataset.yaml",
         epochs=150,
-        batch=24,
+        batch=20,
         imgsz=640,
         device=0,
         workers=0,
         cos_lr=True,
         close_mosaic=10,
-        patience=50,
+        patience=30,
         amp=True,
+        lrf=0.1,
+        mixup=0.15,
+        copy_paste=0.1,
+        label_smoothing=0.1,
         project="runs/detect",
         name="fridge36_11n_kd",
         exist_ok=True,
