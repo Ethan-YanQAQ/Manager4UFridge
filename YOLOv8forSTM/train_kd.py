@@ -38,8 +38,12 @@ def _kd_loss(self, batch, preds=None):
         preds = self.forward(batch["img"])
 
     # 验证 / warmup 时 preds 可能是 tuple（非 raw dict），走原始 loss 跳过 KD
+    # 但必须补齐 loss_items 到 6 列，否则 trainer/validator 尺寸不匹配
     if not isinstance(preds, dict):
-        return self._kd_orig_loss(batch, preds)
+        loss, loss_items = self._kd_orig_loss(batch, preds)
+        kd_pad = torch.zeros(3, device=loss.device)
+        loss_items = torch.cat([loss_items, kd_pad])
+        return loss, loss_items
 
     # 1) 原始检测损失
     loss, loss_items = self._kd_orig_loss(batch, preds)
@@ -89,6 +93,12 @@ class KDTrainer(DetectionTrainer):
         kd_box_weight (float): 框回归 KD 权重，默认 0.3
     """
 
+    _KD_ATTRS = [
+        "loss",  # 保存前恢复原始 loss
+        "_kd_teacher", "_kd_nc", "_kd_temp", "_kd_cls_w", "_kd_box_w",
+        "_kd_orig_loss", "_kd_loss",
+    ]
+
     def __init__(self, cfg=DEFAULT_CFG_DICT, overrides=None, _callbacks=None):
         overrides = dict(overrides) if overrides else {}
         self.teacher_weights = overrides.pop("teacher_weights", None)
@@ -119,13 +129,65 @@ class KDTrainer(DetectionTrainer):
         self.model._kd_box_w = self.kd_box_w
         self.model._kd_orig_loss = self.model.loss
 
-        # -- 用 MethodType 替换 model.loss（正确绑定 self） --
+        # -- 替换 model.loss（MethodType 正确绑定 self） --
+        # 同时把 _kd_loss 存入 model.__dict__，保证 deepcopy / pickle 时
+        # nn.Module.__getattr__ 不会因为找不到 _kd_loss 而崩溃
+        self.model._kd_loss = _kd_loss
         self.model.loss = _types.MethodType(_kd_loss, self.model)
 
         if teacher.nc != self.model.nc:
             print(f"[KD] 教师 nc={teacher.nc}，学生 nc={self.model.nc}，截断至 {self.model._kd_nc}")
         print(f"[KD] 教师模型已加载: {os.path.basename(self.teacher_weights)}")
         print(f"[KD]   T={self.kd_temp}  cls_w={self.kd_cls_w}  box_w={self.kd_box_w}")
+
+    # ---- save_model：保存前剥离 KD 状态，避免污染 checkpoint ----
+
+    @staticmethod
+    def _strip_kd(model):
+        """剥离模型的 KD 状态，返回备份 dict。model 为 None 时返回空。"""
+        if model is None:
+            return {}
+        saved = {}
+        d = model.__dict__
+        # 1) 备份 __dict__ 中的 KD 属性（_kd_nc, _kd_temp, _kd_loss 等）
+        for attr in KDTrainer._KD_ATTRS:
+            if attr in d:
+                saved[attr] = d[attr]
+        # 2) _kd_teacher 是 nn.Module，存在 _modules 中，单独备份
+        if "_kd_teacher" in model._modules:
+            saved["_kd_teacher"] = model._modules["_kd_teacher"]
+        # 3) 恢复原始 loss
+        if "_kd_orig_loss" in saved:
+            model.loss = saved["_kd_orig_loss"]
+        # 4) 从 __dict__ 和 _modules 中删除 KD 属性
+        for attr in KDTrainer._KD_ATTRS:
+            d.pop(attr, None)
+        model._modules.pop("_kd_teacher", None)
+        return saved
+
+    @staticmethod
+    def _restore_kd(model, saved):
+        """恢复模型被剥离的 KD 状态。"""
+        if model is None or not saved:
+            return
+        for attr, val in saved.items():
+            setattr(model, attr, val)
+
+    def save_model(self):
+        """保存 checkpoint 前剥离 KD 状态，保证 deepcopy 和 pickle 干净。"""
+        from ultralytics.utils.torch_utils import unwrap_model
+
+        model = unwrap_model(self.model)
+        ema_model = unwrap_model(self.ema.ema) if self.ema else None
+
+        saved_model = self._strip_kd(model)
+        saved_ema = self._strip_kd(ema_model)
+
+        try:
+            return super().save_model()
+        finally:
+            self._restore_kd(model, saved_model)
+            self._restore_kd(ema_model, saved_ema)
 
 
 def run_stage1():
