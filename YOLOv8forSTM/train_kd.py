@@ -39,10 +39,12 @@ import types as _types
 
 def _make_fixed_check_amp():
     """构建 patched check_amp（闭包工厂，避免重复粘贴函数体）。
-    用传入的 model 直接验证 AMP，不下载 yolo26n.pt。"""
+    用传入的 model 直接验证 AMP，不下载 yolo26n.pt。
+    model 是裸 DetectionModel（trainer 传入的 self.model），只接受 tensor。"""
     from ultralytics.utils.checks import colorstr, ASSETS as _ASSETS
     from ultralytics.utils.torch_utils import autocast
     import re
+    import cv2
 
     def _fixed_check_amp(model):
         device = next(model.parameters()).device
@@ -58,15 +60,22 @@ def _make_fixed_check_amp():
             print(f"{prefix}checks failed - {gpu} GPU may have AMP issues, disabling AMP")
             return False
 
-        # 使用 ultralytics 自带的 bus.jpg（本地文件，无需联网）
-        im = _ASSETS / "bus.jpg"
         print(f"{prefix}running AMP checks with current model (skipping yolo26n download)...")
         try:
-            batch = [im] * 8
+            # 加载并预处理图像为 tensor（裸模型只接受 tensor，不接受路径）
             imgsz = max(256, int(model.stride.max() * 4))
-            a = model(batch, imgsz=imgsz, device=device, verbose=False)[0].boxes.data
+            img = cv2.imread(str(_ASSETS / "bus.jpg"))
+            if img is None:
+                raise FileNotFoundError("bus.jpg not found in ultralytics assets")
+            img = cv2.resize(img, (imgsz, imgsz))          # HWC, BGR
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)     # → RGB
+            tensor = torch.from_numpy(img).float() / 255.0  # HWC [0,1]
+            tensor = tensor.permute(2, 0, 1).unsqueeze(0)   # → 1CHW
+            batch = tensor.expand(8, -1, -1, -1).to(device) # [8, 3, H, W]
+
+            a = model(batch)[0].boxes.data                    # FP32 inference
             with autocast(enabled=True):
-                b = model(batch, imgsz=imgsz, device=device, verbose=False)[0].boxes.data
+                b = model(batch)[0].boxes.data                # AMP inference
             ok = a.shape == b.shape and torch.allclose(a, b.float(), atol=0.5)
             if ok:
                 print(f"{prefix}checks passed")
@@ -356,9 +365,23 @@ if __name__ == "__main__":
                         help="1 = 训教师, 2 = 蒸馏")
     parser.add_argument("--teacher", type=str, default=None,
                         help="Stage 2 教师权重路径（默认自动查找 Stage 1 输出）")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="从指定 last.pt 恢复训练（如 runs/detect/.../weights/last.pt）")
     args = parser.parse_args()
 
     os.environ["ULTRALYTICS_OFFLINE"] = "1"  # 禁止联网下载
+
+    # AMP 补丁已在模块级自动应用
+
+    # --resume 模式
+    if args.resume:
+        if not os.path.exists(args.resume):
+            print(f"[ERROR] 恢复权重不存在: {args.resume}")
+            sys.exit(1)
+        print(f"[RESUME] 从 {args.resume} 恢复训练")
+        model = YOLO(args.resume)
+        model.train(resume=True)
+        sys.exit(0)
 
     if args.stage == 1:
         run_stage1()
