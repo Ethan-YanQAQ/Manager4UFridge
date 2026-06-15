@@ -29,14 +29,20 @@ import types as _types
 # ---- Patch check_amp：用当前模型做 AMP 检查，不下载 yolo26n.pt ----
 # 原版 check_amp 硬编码 amp_allclose(YOLO("yolo26n.pt"), im)，网络超时(OSError)不被
 # ConnectionError 捕获 → 无限重试。修成用传入的 model 直接验证 AMP。
+#
+# 两个补丁点（缺一不可）：
+#   1) ultralytics.utils.checks.check_amp — 模块级函数本体
+#   2) ultralytics.engine.trainer.check_amp — trainer.py:46 用 from import
+#      拿到的本地引用，trainer 内部只走本地引用，不走模块本体。
+#   3) ultralytics.utils.torch_utils.check_amp — YOLO.__init__ 中的冗余复本
+#      （同文件 autocast 被 trainer 直接 from import，可能 check_amp 也被复制）
 
-def _patch_check_amp():
-    import ultralytics.utils.checks as _checks
-    from ultralytics.utils.checks import colorstr
+def _make_fixed_check_amp():
+    """构建 patched check_amp（闭包工厂，避免重复粘贴函数体）。
+    用传入的 model 直接验证 AMP，不下载 yolo26n.pt。"""
+    from ultralytics.utils.checks import colorstr, ASSETS as _ASSETS
     from ultralytics.utils.torch_utils import autocast
     import re
-
-    _orig_check_amp = _checks.check_amp
 
     def _fixed_check_amp(model):
         device = next(model.parameters()).device
@@ -52,8 +58,8 @@ def _patch_check_amp():
             print(f"{prefix}checks failed - {gpu} GPU may have AMP issues, disabling AMP")
             return False
 
-        from pathlib import Path
-        im = _checks.ASSETS / "bus.jpg"
+        # 使用 ultralytics 自带的 bus.jpg（本地文件，无需联网）
+        im = _ASSETS / "bus.jpg"
         print(f"{prefix}running AMP checks with current model (skipping yolo26n download)...")
         try:
             batch = [im] * 8
@@ -71,10 +77,35 @@ def _patch_check_amp():
             print(f"{prefix}checks failed ({e}), enabling AMP with warning")
             return True
 
-    _checks.check_amp = _fixed_check_amp
-    print("[PATCH] check_amp: 使用当前模型验证 AMP，不再下载 yolo26n.pt")
+    return _fixed_check_amp
+
+
+def _patch_check_amp():
+    import ultralytics.utils.checks as _checks
+    import ultralytics.utils.torch_utils as _torch_utils
+
+    _fixed = _make_fixed_check_amp()
+
+    # 补丁 1：checks 模块本体
+    _checks.check_amp = _fixed
+    # 补丁 2：torch_utils 中可能存在的复本
+    if hasattr(_torch_utils, "check_amp"):
+        _torch_utils.check_amp = _fixed
+
+    print("[PATCH] check_amp (stage 1/2): checks + torch_utils 已替换")
 
 _patch_check_amp()
+
+
+def _patch_trainer_check_amp():
+    """补丁 3：修正 trainer 模块的本地 from-import 引用。
+    YOLO 在第 22 行已导入（trainer 模块随之加载），此时可安全修补。"""
+    import ultralytics.engine.trainer as _trainer
+    _fixed = _make_fixed_check_amp()
+    _trainer.check_amp = _fixed
+    print("[PATCH] check_amp (stage 2/2): trainer 本地引用已替换")
+
+_patch_trainer_check_amp()
 
 
 # ---- 模块级 KD loss 函数（通过 model._kd_* 属性传递状态） ----
