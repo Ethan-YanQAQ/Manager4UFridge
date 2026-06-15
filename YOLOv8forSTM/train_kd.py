@@ -301,7 +301,7 @@ def run_stage1():
         batch=16,
         imgsz=640,
         device=0,
-        workers=0,
+        workers=8,
         cos_lr=True,
         close_mosaic=15,
         patience=30,
@@ -337,7 +337,7 @@ def run_stage2(teacher_path):
         batch=20,
         imgsz=640,
         device=0,
-        workers=0,
+        workers=8,
         cos_lr=True,
         close_mosaic=10,
         patience=25,
@@ -361,7 +361,7 @@ def run_stage2(teacher_path):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YOLO11 KD 训练")
-    parser.add_argument("--stage", type=int, required=True, choices=[1, 2],
+    parser.add_argument("--stage", type=int, choices=[1, 2],
                         help="1 = 训教师, 2 = 蒸馏")
     parser.add_argument("--teacher", type=str, default=None,
                         help="Stage 2 教师权重路径（默认自动查找 Stage 1 输出）")
@@ -380,8 +380,12 @@ if __name__ == "__main__":
             sys.exit(1)
         print(f"[RESUME] 从 {args.resume} 恢复训练")
         model = YOLO(args.resume)
-        model.train(resume=True)
+        model.train(resume=True, workers=8)
         sys.exit(0)
+
+    if args.stage is None and args.resume is None:
+        print("[ERROR] 请指定 --stage {1,2} 或 --resume <last.pt>")
+        sys.exit(1)
 
     if args.stage == 1:
         run_stage1()

@@ -27,7 +27,7 @@
 - Kaggle Fruit 360（水果）
 总计 ~12,811 训练图 / ~1,274 验证图
 
-## 知识蒸馏训练
+## 知识蒸馏训练(env:anaconda:fridge_ai)
 采用两阶段策略（train_kd.py）：
 - Stage 1：YOLO11m 教师模型（20M 参数，~68 GFLOPs）
 - Stage 2：YOLO11n 学生模型（KD 损失 = 分类 KL 散度 + 框回归 MSE）
