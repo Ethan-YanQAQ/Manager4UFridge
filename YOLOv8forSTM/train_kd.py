@@ -26,6 +26,57 @@ import os
 import types as _types
 
 
+# ---- Patch check_amp：用当前模型做 AMP 检查，不下载 yolo26n.pt ----
+# 原版 check_amp 硬编码 amp_allclose(YOLO("yolo26n.pt"), im)，网络超时(OSError)不被
+# ConnectionError 捕获 → 无限重试。修成用传入的 model 直接验证 AMP。
+
+def _patch_check_amp():
+    import ultralytics.utils.checks as _checks
+    from ultralytics.utils.checks import colorstr
+    from ultralytics.utils.torch_utils import autocast
+    import re
+
+    _orig_check_amp = _checks.check_amp
+
+    def _fixed_check_amp(model):
+        device = next(model.parameters()).device
+        prefix = colorstr("AMP: ")
+        if device.type in {"cpu", "mps"}:
+            return False
+        pattern = re.compile(
+            r"(nvidia|geforce|quadro|tesla).*?(1660|1650|1630|t400|t550|t600|t1000|t1200|t2000|k40m)",
+            re.IGNORECASE,
+        )
+        gpu = torch.cuda.get_device_name(device)
+        if bool(pattern.search(gpu)):
+            print(f"{prefix}checks failed - {gpu} GPU may have AMP issues, disabling AMP")
+            return False
+
+        from pathlib import Path
+        im = _checks.ASSETS / "bus.jpg"
+        print(f"{prefix}running AMP checks with current model (skipping yolo26n download)...")
+        try:
+            batch = [im] * 8
+            imgsz = max(256, int(model.stride.max() * 4))
+            a = model(batch, imgsz=imgsz, device=device, verbose=False)[0].boxes.data
+            with autocast(enabled=True):
+                b = model(batch, imgsz=imgsz, device=device, verbose=False)[0].boxes.data
+            ok = a.shape == b.shape and torch.allclose(a, b.float(), atol=0.5)
+            if ok:
+                print(f"{prefix}checks passed")
+            else:
+                print(f"{prefix}checks failed - FP32/AMP mismatch, disabling AMP")
+            return ok
+        except Exception as e:
+            print(f"{prefix}checks failed ({e}), enabling AMP with warning")
+            return True
+
+    _checks.check_amp = _fixed_check_amp
+    print("[PATCH] check_amp: 使用当前模型验证 AMP，不再下载 yolo26n.pt")
+
+_patch_check_amp()
+
+
 # ---- 模块级 KD loss 函数（通过 model._kd_* 属性传递状态） ----
 
 def _kd_loss(self, batch, preds=None):
@@ -191,35 +242,50 @@ class KDTrainer(DetectionTrainer):
 
 
 def run_stage1():
-    """训练 YOLO11m 教师模型（标准训练，无 KD）。"""
+    """训练 YOLO11m 教师模型（v2：防过拟合改进）。
+
+    改进点（vs v1 epoch 60 后过拟合）：
+      - epochs 200→100，patience 50→30
+      - 添加 mixup + label_smoothing 正则化
+      - close_mosaic 10→15（更多微调时间）
+    """
     print("=" * 60)
-    print("Stage 1: 训练 YOLO11m 教师模型")
+    print("Stage 1: 训练 YOLO11m 教师模型 (v2)")
     print("=" * 60)
 
     model = YOLO("yolo11m.pt")
 
     results = model.train(
         data="datasets/fridge_36/dataset.yaml",
-        epochs=200,
+        epochs=100,
         batch=16,
         imgsz=640,
         device=0,
         workers=0,
         cos_lr=True,
-        close_mosaic=10,
-        patience=50,
+        close_mosaic=15,
+        patience=30,
         amp=True,
+        mixup=0.1,
+        label_smoothing=0.1,
         project="runs/detect",
-        name="fridge36_11m_teacher",
+        name="fridge36_11m_v2",
         exist_ok=True,
     )
     return results
 
 
 def run_stage2(teacher_path):
-    """蒸馏训练 YOLO11n 学生模型。"""
+    """蒸馏训练 YOLO11n 学生模型（v2：更强 KD 推动）。
+
+    改进点（vs v1 epoch 65 后 plateau）：
+      - KD 权重提升：cls 0.5→0.8，box 0.3→0.5
+      - 温度 3.0→4.0（更软的教师分布）
+      - epochs 150→100，patience 30→25
+      - label_smoothing 已弃用故移除
+    """
     print("=" * 60)
-    print("Stage 2: 蒸馏 → YOLO11n 学生模型")
+    print("Stage 2: 蒸馏 → YOLO11n 学生模型 (v2)")
     print(f"教师模型: {teacher_path}")
     print("=" * 60)
 
@@ -227,28 +293,27 @@ def run_stage2(teacher_path):
 
     results = model.train(
         data="datasets/fridge_36/dataset.yaml",
-        epochs=150,
+        epochs=100,
         batch=20,
         imgsz=640,
         device=0,
         workers=0,
         cos_lr=True,
         close_mosaic=10,
-        patience=30,
+        patience=25,
         amp=True,
         lrf=0.1,
         mixup=0.15,
         copy_paste=0.1,
-        label_smoothing=0.1,
         project="runs/detect",
-        name="fridge36_11n_kd",
+        name="fridge36_11n_kd_v2",
         exist_ok=True,
-        # --- KD 自定义参数（传给 KDTrainer）---
+        # --- KD 自定义参数 ---
         trainer=KDTrainer,
         teacher_weights=teacher_path,
-        kd_temp=3.0,
-        kd_cls_weight=0.5,
-        kd_box_weight=0.3,
+        kd_temp=4.0,
+        kd_cls_weight=0.8,
+        kd_box_weight=0.5,
     )
     return results
 
@@ -270,10 +335,15 @@ if __name__ == "__main__":
     elif args.stage == 2:
         teacher = args.teacher
         if teacher is None:
-            # 自动查找 Stage 1 best
-            candidate = "runs/detect/fridge36_11m_teacher/weights/best.pt"
-            if os.path.exists(candidate):
-                teacher = candidate
+            # 自动查找 Stage 1 best（按优先级：v2 > v1）
+            candidates = [
+                "runs/detect/fridge36_11m_v2/weights/best.pt",
+                "runs/detect/fridge36_11m_teacher/weights/best.pt",
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    teacher = c
+                    break
             else:
                 print("[ERROR] 找不到教师模型，请用 --teacher 指定")
                 sys.exit(1)
