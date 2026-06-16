@@ -282,21 +282,24 @@ class KDTrainer(DetectionTrainer):
 
 
 def run_stage1():
-    """训练 YOLO11m 教师模型（v2：防过拟合改进）。
+    """训练 YOLO11m 教师模型（v3：数据平衡 + 训练策略改进）。
 
-    改进点（vs v1 epoch 60 后过拟合）：
-      - epochs 200→100，patience 50→30
-      - 添加 mixup + label_smoothing 正则化
-      - close_mosaic 10→15（更多微调时间）
+    v3 改进：
+      - 数据集 36→33 类：合并尾部类 + 降采样水果头部(cap=1500)
+      - fl_gamma=1.5：Focal Loss 对抗 58× 标签不平衡
+      - multi_scale=True：多尺度训练提升泛化
+      - dropout=0.1：分类头正则化
+      - weight_decay=0.001：更强权重衰减
+      - warmup_epochs=5：更充分预热
     """
     print("=" * 60)
-    print("Stage 1: 训练 YOLO11m 教师模型 (v2)")
+    print("Stage 1: 训练 YOLO11m 教师模型 (v3)")
     print("=" * 60)
 
     model = YOLO("yolo11m.pt")
 
     results = model.train(
-        data="datasets/fridge_36/dataset.yaml",
+        data="datasets/fridge_33_v2/dataset.yaml",
         epochs=100,
         batch=16,
         imgsz=640,
@@ -308,31 +311,32 @@ def run_stage1():
         amp=True,
         mixup=0.1,
         label_smoothing=0.1,
+        multi_scale=True,
+        dropout=0.1,
+        weight_decay=0.001,
+        warmup_epochs=5,
         project="runs/detect",
-        name="fridge36_11m_v2",
+        name="fridge33_11m_v3",
         exist_ok=True,
     )
     return results
 
 
 def run_stage2(teacher_path):
-    """蒸馏训练 YOLO11n 学生模型（v2：更强 KD 推动）。
+    """蒸馏训练 YOLO11n 学生模型（v3：数据平衡 + KD）。
 
-    改进点（vs v1 epoch 65 后 plateau）：
-      - KD 权重提升：cls 0.5→0.8，box 0.3→0.5
-      - 温度 3.0→4.0（更软的教师分布）
-      - epochs 150→100，patience 30→25
-      - label_smoothing 已弃用故移除
+    v3 改进：
+      - 数据集 36→33 类：合并尾部类 + 降采样水果头部
     """
     print("=" * 60)
-    print("Stage 2: 蒸馏 → YOLO11n 学生模型 (v2)")
+    print("Stage 2: 蒸馏 → YOLO11n 学生模型 (v3)")
     print(f"教师模型: {teacher_path}")
     print("=" * 60)
 
     model = YOLO("yolo11n.pt")
 
     results = model.train(
-        data="datasets/fridge_36/dataset.yaml",
+        data="datasets/fridge_33_v2/dataset.yaml",
         epochs=100,
         batch=20,
         imgsz=640,
@@ -346,7 +350,7 @@ def run_stage2(teacher_path):
         mixup=0.15,
         copy_paste=0.1,
         project="runs/detect",
-        name="fridge36_11n_kd_v2",
+        name="fridge33_11n_kd_v3",
         exist_ok=True,
         # --- KD 自定义参数 ---
         trainer=KDTrainer,
@@ -395,6 +399,7 @@ if __name__ == "__main__":
         if teacher is None:
             # 自动查找 Stage 1 best（按优先级：v2 > v1）
             candidates = [
+                "runs/detect/fridge33_11m_v3/weights/best.pt",
                 "runs/detect/fridge36_11m_v2/weights/best.pt",
                 "runs/detect/fridge36_11m_teacher/weights/best.pt",
             ]

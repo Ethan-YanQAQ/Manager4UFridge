@@ -1,296 +1,254 @@
 """
-重建 fridge_36：v4 优先，v1 去重，再合并水果 6 类。
-重复图片：保留 v4，丢弃 v1。
+重建平衡数据集 v2：合并尾部类 + 图片级降采样头部类
+
+合并：
+  common_mushrooms + shiitake_mushroom → mushroom
+  mustard_greens + water_morning_glory + amaranth → leafy_greens
+
+降采样（图片级 cap=1500，仅丢弃图片，不修改标签）：
+  Orange, Apple, Grape, Banana
+
+策略：
+  1. 优先丢弃"只含头部类"的图
+  2. 如果 head-only 池不够，再从"混合"池丢（含非头部类的图也会丢）
 """
 
-import zipfile
 import os
-import hashlib
-from pathlib import Path
-from collections import defaultdict
-
-V1_ZIP = "C:/Users/29264/Desktop/QS/YOLOv8forSTM/food.v1i.yolov8.zip"
-V4_ZIP = "C:/Users/29264/Desktop/QS/YOLOv8forSTM/food.v4i.yolov8.zip"
-FRUIT_ZIP = "C:/Users/29264/Desktop/QS/YOLOv8forSTM/archive.zip"  # 水果数据集
-OUT_DIR = Path("C:/Users/29264/Desktop/QS/YOLOv8forSTM/datasets/fridge_36")
-
-# ---------- 类别定义 ----------
-FRIDGE30 = [
-    'beef','chicken','pork','duck',
-    'fish','shrimp','squid','clams','eel','sea_crab',
-    'egg','tofu','bean_sprouts',
-    'cabbage','carrot','cauliflower_broccoli','corn','cucumber',
-    'eggplant','garlic','onion','potato','tomato',
-    'pumpkin','bitter_gourd',
-    'mustard_greens','water_morning_glory','amaranth',
-    'common_mushrooms','shiitake_mushroom',
-]
-FRUIT6 = ['Apple','Banana','Grape','Orange','Pineapple','Watermelon']
-ALL36 = FRIDGE30 + FRUIT6
-
-# ---------- 类别 ID 映射 ----------
-def get_class_id_map(zip_path):
-    """读取 zip 中 data.yaml，返回 {class_name: old_id}"""
-    zf = zipfile.ZipFile(zip_path, 'r')
-    content = zf.read('data.yaml').decode('utf-8')
-    zf.close()
-    # 简单解析
-    lines = content.split('\n')
-    names_str = None
-    for line in lines:
-        if line.startswith('names:'):
-            names_str = line.split('names:')[1].strip()
-            break
-    if names_str and names_str.startswith('['):
-        import ast
-        names = ast.literal_eval(names_str)
-    else:
-        names = []
-    return {n: i for i, n in enumerate(names)}
-
-# Roboflow 78 类映射
-rb_map = get_class_id_map(V1_ZIP)
-# 验证 v1 v4 一致
-rb_map4 = get_class_id_map(V4_ZIP)
-assert rb_map == rb_map4, "v1 v4 类别不一致"
-
-# 水果 6 类映射
-fruit_map = {'Apple':0,'Banana':1,'Grape':2,'Orange':3,'Pineapple':4,'Watermelon':5}
-
-# 构建 Roboflow 78 → fridge_30 的 ID 映射
-rb78_to_f30 = {}  # {rb78_class_id: fridge30_id}
-for f30_id, cls in enumerate(FRIDGE30):
-    rb78_to_f30[rb_map[cls]] = f30_id
-
-# ---------- 创建输出目录 ----------
-for split in ['train','valid','test']:
-    (OUT_DIR/'images'/split).mkdir(parents=True, exist_ok=True)
-    (OUT_DIR/'labels'/split).mkdir(parents=True, exist_ok=True)
-
-# ---------- 工具函数 ----------
-def process_roboflow(zip_path, tag, seen_hashes, is_primary):
-    """
-    从 Roboflow zip 提取 30 类数据。
-    is_primary=True 时，记录 hash 但不跳过。
-    is_primary=False 时，跳过 seen_hashes 中已有的。
-    """
-    zf = zipfile.ZipFile(zip_path, 'r')
-
-    # 收集 label/image 配对
-    pairs = defaultdict(dict)  # (split,stem) -> {'label':path, 'image':path}
-    for member in zf.namelist():
-        parts = member.split('/')
-        if len(parts) < 3:
-            continue
-        split = parts[0]  # train/valid/test
-        if split not in ('train','valid','test'):
-            continue
-        subdir = parts[1]  # images/labels
-        filename = parts[2]
-        if not filename:
-            continue
-        stem = os.path.splitext(filename)[0]
-        key = (split, stem)
-        if subdir == 'labels':
-            pairs[key]['label'] = member
-        elif subdir == 'images':
-            pairs[key]['image'] = member
-
-    stats = defaultdict(int)
-    extracted = 0
-    skipped_dup = 0
-    skipped_class = 0
-
-    for (split, stem), entry in pairs.items():
-        lbl_path = entry.get('label')
-        img_path = entry.get('image')
-        if not lbl_path or not img_path:
-            continue
-
-        label_raw = zf.read(lbl_path).decode('utf-8').strip()
-        if not label_raw:
-            continue
-
-        # 过滤 + 重映射类别 ID
-        new_lines = []
-        for line in label_raw.split('\n'):
-            parts_line = line.strip().split()
-            if not parts_line:
-                continue
-            old_cls = int(parts_line[0])
-            if old_cls in rb78_to_f30:
-                new_lines.append(f"{rb78_to_f30[old_cls]} {' '.join(parts_line[1:])}")
-
-        if not new_lines:
-            skipped_class += 1
-            continue
-
-        # 读图片算 hash
-        img_data = zf.read(img_path)
-        h = hashlib.md5(img_data).hexdigest()
-
-        if is_primary:
-            # v4: 总是写入，记录 hash
-            seen_hashes.add(h)
-        else:
-            # v1: 如果 v4 已存在则跳过
-            if h in seen_hashes:
-                skipped_dup += 1
-                continue
-            seen_hashes.add(h)
-
-        cls_name = FRIDGE30[int(new_lines[0].split()[0])]
-        out_name = f"rb__{cls_name}__{stem}"
-        with open(OUT_DIR/'images'/split/f"{out_name}.jpg", 'wb') as f:
-            f.write(img_data)
-        with open(OUT_DIR/'labels'/split/f"{out_name}.txt", 'w') as f:
-            f.write('\n'.join(new_lines))
-
-        stats[cls_name] += 1
-        extracted += 1
-
-    zf.close()
-    print(f"  [{tag}] 提取 {extracted} 张, 跳过(非目标类) {skipped_class}, "
-          f"跳过(v4重复) {skipped_dup}, hash累计 {len(seen_hashes)}")
-    return stats
-
-def process_fruit(seen_hashes):
-    """提取水果 6 类，ID 从 30 开始"""
-    zf = zipfile.ZipFile(FRUIT_ZIP, 'r')
-    prefix = "Fruits-detection/"
-
-    pairs = defaultdict(dict)
-    for member in zf.namelist():
-        if not member.startswith(prefix):
-            continue
-        rel = member[len(prefix):]
-        parts = rel.replace('\\','/').split('/')
-        if len(parts) < 3:
-            continue
-        folder = parts[0]  # train/valid/test
-        subdir = parts[1]  # images/labels
-        filename = parts[2]
-        if folder not in ('train','valid','test'):
-            continue
-        if not filename:
-            continue
-        stem = os.path.splitext(filename)[0]
-        key = (folder, stem)
-        if subdir == 'labels':
-            pairs[key]['label'] = member
-        elif subdir == 'images':
-            pairs[key]['image'] = member
-
-    stats = defaultdict(int)
-    extracted = 0
-    skipped_dup = 0
-    fruit_offset = len(FRIDGE30)
-
-    for (split, stem), entry in pairs.items():
-        lbl_path = entry.get('label')
-        img_path = entry.get('image')
-        if not lbl_path or not img_path:
-            continue
-
-        label_raw = zf.read(lbl_path).decode('utf-8').strip()
-        if not label_raw:
-            continue
-
-        new_lines = []
-        for line in label_raw.split('\n'):
-            parts_line = line.strip().split()
-            if not parts_line:
-                continue
-            old_cls = int(parts_line[0])
-            new_lines.append(f"{old_cls + fruit_offset} {' '.join(parts_line[1:])}")
-
-        img_data = zf.read(img_path)
-        h = hashlib.md5(img_data).hexdigest()
-        if h in seen_hashes:
-            skipped_dup += 1
-            continue
-        seen_hashes.add(h)
-
-        cls_name = FRUIT6[int(label_raw.split('\n')[0].split()[0])]
-        out_name = f"fruit__{cls_name}__{stem}"
-        with open(OUT_DIR/'images'/split/f"{out_name}.jpg", 'wb') as f:
-            f.write(img_data)
-        with open(OUT_DIR/'labels'/split/f"{out_name}.txt", 'w') as f:
-            f.write('\n'.join(new_lines))
-
-        stats[cls_name] += 1
-        extracted += 1
-
-    zf.close()
-    print(f"  [fruit] 提取 {extracted} 张, 跳过(v4重复) {skipped_dup}")
-    return stats
-
-# ---------- 主流程 ----------
-print("=" * 60)
-print("重建 fridge_36: v4 优先 → v1 去重 → 水果")
-
-# Step 1: 清空输出目录
+import yaml
+import random
 import shutil
-if OUT_DIR.exists():
-    shutil.rmtree(OUT_DIR)
-for split in ['train','valid','test']:
-    (OUT_DIR/'images'/split).mkdir(parents=True, exist_ok=True)
-    (OUT_DIR/'labels'/split).mkdir(parents=True, exist_ok=True)
+from collections import defaultdict, Counter
+from pathlib import Path
 
-seen = set()
+random.seed(42)
 
-# Step 2: v4 优先
-print("\n>> 处理 v4 (优先)...")
-stats_v4 = process_roboflow(V4_ZIP, "v4", seen, is_primary=True)
+SRC = Path("c:/Users/29264/Desktop/QS/YOLOv8forSTM/datasets/fridge_36")
+DST = Path("c:/Users/29264/Desktop/QS/YOLOv8forSTM/datasets/fridge_33_v2")
+IMG_CAP = 1500  # 每个头部类最多保留 N 张图
 
-# Step 3: v1 去重
-print("\n>> 处理 v1 (去重: 跳过 v4 已有)...")
-stats_v1 = process_roboflow(V1_ZIP, "v1", seen, is_primary=False)
+# ---- 1. 加载原始 class names ----
+with open(SRC / "dataset.yaml") as f:
+    orig_cfg = yaml.safe_load(f)
+orig_names = orig_cfg["names"]
 
-# Step 4: 水果
-print("\n>> 处理水果数据集...")
-stats_fruit = process_fruit(seen)
+# ---- 2. old_id → new_id 映射 ----
+old_to_new = {}
+new_names = []
 
-# ---------- 统计 ----------
-print("\n" + "=" * 60)
-print("fridge_36 重建完成:")
-total_train = total_valid = total_test = 0
-for cls in ALL36:
-    t4 = stats_v4.get(cls, 0)
-    t1 = stats_v1.get(cls, 0)
-    tf = stats_fruit.get(cls, 0)
-    print(f"  {cls:<30s}  v4={t4:>4d}  v1={t1:>4d}  fruit={tf:>4d}  = {t4+t1+tf:>5d}")
+for i in range(25):
+    old_to_new[i] = i
+    new_names.append(orig_names[i])
 
-# 按 split 统计
-for split in ['train','valid','test']:
-    n_img = len(list((OUT_DIR/'images'/split).iterdir()))
-    if split == 'train':
-        total_train = n_img
-    elif split == 'valid':
-        total_valid = n_img
+for i in (25, 26, 27):
+    old_to_new[i] = 25
+new_names.append("leafy_greens")
+
+for i in (28, 29):
+    old_to_new[i] = 26
+new_names.append("mushroom")
+
+for i in range(30, 36):
+    old_to_new[i] = i - 3
+    new_names.append(orig_names[i])
+
+NC = 33
+HEAD_CLASSES = {27, 28, 29, 30}  # Apple, Banana, Grape, Orange
+
+print(f"36 -> {NC} classes")
+print(f"Merges: class 25=leafy_greens, class 26=mushroom")
+print(f"Image cap={IMG_CAP} for: {[new_names[i] for i in sorted(HEAD_CLASSES)]}")
+print()
+
+# ---- 3. 构建 image → class_ids 映射 ----
+image_classes = {}  # rel_path → set of new class ids
+
+for split in ("train", "valid", "test"):
+    label_dir = SRC / f"labels/{split}"
+    if not label_dir.is_dir():
+        continue
+    for lb_file in sorted(label_dir.iterdir()):
+        if lb_file.suffix != ".txt":
+            continue
+        new_ids = set()
+        with open(lb_file) as fh:
+            for line in fh:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                new_ids.add(old_to_new[int(parts[0])])
+        if new_ids:
+            rel = str(Path(f"images/{split}") / lb_file.with_suffix(".jpg").name)
+            image_classes[rel] = new_ids
+
+print(f"Total images: {len(image_classes)}")
+
+# ---- 4. 当前每类图片数 ----
+img_per_class = Counter()
+head_only_images = []
+mixed_images = []
+
+for img, classes in image_classes.items():
+    for c in classes:
+        img_per_class[c] += 1
+    if classes.issubset(HEAD_CLASSES):
+        head_only_images.append(img)
     else:
-        total_test = n_img
+        mixed_images.append(img)
 
-total_all = 0
-for cls in ALL36:
-    total_all += stats_v4.get(cls,0) + stats_v1.get(cls,0) + stats_fruit.get(cls,0)
+print(f"Head-only images (only fruit): {len(head_only_images)}")
+print(f"Mixed images (fruit + other):  {len(mixed_images)}")
+print()
 
-print(f"\n  train={total_train}, valid={total_valid}, test={total_test}, 总计={total_all}")
+print("Before downsampling (images per class):")
+for cid in range(NC):
+    cnt = img_per_class.get(cid, 0)
+    marker = " <-- HEAD" if cid in HEAD_CLASSES else ""
+    print(f"  {cid:2d}  {new_names[cid]:25s}  {cnt:6,} images{marker}")
 
-# ---------- 写 dataset.yaml ----------
-yaml_content = f"""# Fridge 36 -- Smart Fridge Food Detection Dataset
-# v4 priority, v1 deduped + Fruit Detection 6
-# 36 classes: meat, seafood, vegetables, fruits
+# ---- 5. 图片级降采样 ----
+# 为每个头部类建立候选丢弃列表
+drop_candidates = {}  # head_class → [img_list] (sorted by "quality to drop")
+for c in HEAD_CLASSES:
+    candidates = []
+    for img in head_only_images:
+        if c in image_classes[img]:
+            candidates.append(img)
+    # head-only 优先
+    candidates.sort()  # deterministic order
+    random.shuffle(candidates)
+    drop_candidates[c] = candidates
 
-path: {OUT_DIR.as_posix()}
+# 逐个头部类处理
+to_drop = set()  # 已经标记为丢弃的图片
+
+for c in sorted(HEAD_CLASSES, key=lambda x: img_per_class.get(x, 0), reverse=True):
+    current = img_per_class.get(c, 0)
+    if current <= IMG_CAP:
+        # 但可能因为前面其他类丢弃而降到 cap 以下，重新计算
+        current = sum(1 for img in image_classes
+                      if c in image_classes[img] and img not in to_drop)
+        if current <= IMG_CAP:
+            continue
+
+    need = current - IMG_CAP
+    dropped = 0
+
+    # 先从 head-only 池丢
+    for img in drop_candidates.get(c, []):
+        if dropped >= need:
+            break
+        if img not in to_drop:
+            to_drop.add(img)
+            dropped += 1
+
+    if dropped < need and False:
+        # 理论上应该走mixed pool，但优先不动它
+        pass
+
+    # 重新计算（受影响的所有头部类）
+    for cc in HEAD_CLASSES:
+        img_per_class[cc] = sum(1 for img in image_classes
+                                if cc in image_classes[img] and img not in to_drop)
+
+    print(f"  {new_names[c]:15s}: {current:5,} -> {img_per_class[c]:5,} images (dropped {dropped})")
+
+keep_images = set(image_classes.keys()) - to_drop
+
+print(f"\nDropped: {len(to_drop)} images")
+print(f"Kept:   {len(keep_images)} images")
+
+# ---- 6. 最终统计 ----
+print("\nAfter downsampling:")
+final_img = Counter()
+final_labels = Counter()
+for img in keep_images:
+    for c in image_classes[img]:
+        final_img[c] += 1
+
+# Count labels from actual files
+for img_rel in keep_images:
+    parts = img_rel.replace("\\", "/").split("/")
+    split = parts[1]
+    fname = parts[2]
+    lbl_path = SRC / f"labels/{split}" / Path(fname).with_suffix(".txt").name
+    if lbl_path.exists():
+        with open(lbl_path) as fh:
+            for line in fh:
+                parts2 = line.strip().split()
+                if parts2:
+                    final_labels[old_to_new[int(parts2[0])]] += 1
+
+for cid in range(NC):
+    imgs = final_img.get(cid, 0)
+    lbls = final_labels.get(cid, 0)
+    bar = "|" * int(imgs / 20)
+    marker = " <-- HEAD" if cid in HEAD_CLASSES else ""
+    print(f"  {cid:2d}  {new_names[cid]:25s}  {imgs:5,} imgs  {lbls:6,} labels  {bar}{marker}")
+
+lbl_counts = sorted(final_labels.values())
+if lbl_counts[0] > 0:
+    print(f"\nImbalance: {lbl_counts[-1]/lbl_counts[0]:.1f}x labels  |  max={lbl_counts[-1]:,}  min={lbl_counts[0]}")
+
+# ---- 7. 复制到新数据集 ----
+print(f"\n--- Copying to {DST} ---")
+if DST.exists():
+    shutil.rmtree(DST)
+
+for split in ("train", "valid", "test"):
+    src_img_dir = SRC / f"images/{split}"
+    if not src_img_dir.is_dir():
+        continue
+    src_lbl_dir = SRC / f"labels/{split}"
+    dst_img_dir = DST / f"images/{split}"
+    dst_lbl_dir = DST / f"labels/{split}"
+    dst_img_dir.mkdir(parents=True, exist_ok=True)
+    dst_lbl_dir.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for img_file in sorted(src_img_dir.iterdir()):
+        if img_file.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+            continue
+        rel = str(Path(f"images/{split}") / img_file.name)
+        if rel not in keep_images:
+            continue
+
+        shutil.copy2(img_file, dst_img_dir / img_file.name)
+
+        lb_file = src_lbl_dir / img_file.with_suffix(".txt").name
+        if lb_file.exists():
+            with open(lb_file) as fh:
+                lines = fh.readlines()
+            new_lines = []
+            for line in lines:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                parts[0] = str(old_to_new[int(parts[0])])
+                new_lines.append(" ".join(parts) + "\n")
+            with open(dst_lbl_dir / lb_file.name, "w") as fh:
+                fh.writelines(new_lines)
+        else:
+            open(dst_lbl_dir / lb_file.name, "w").close()
+        copied += 1
+
+    print(f"  {split}: {copied} images")
+
+# ---- 8. 写 dataset.yaml ----
+yaml_path = DST / "dataset.yaml"
+yaml_content = f"""# Fridge 33 v2: balanced dataset (image-level downsampling)
+# 36->33 classes: merged tail classes + downsampled fruit head classes
+# Merges: leafy_greens (25+26+27), mushroom (28+29)
+# Image downsampling (cap={IMG_CAP}): Orange, Apple, Grape, Banana
+
+path: {DST.as_posix()}
 train: images/train
 val: images/valid
 test: images/test
 
-nc: {len(ALL36)}
-names: {ALL36}
+nc: {NC}
+names: {new_names}
 """
-with open(OUT_DIR/'dataset.yaml', 'w', encoding='utf-8') as f:
+with open(yaml_path, "w") as f:
     f.write(yaml_content)
 
-print("\ndataset.yaml written. Done!")
+print(f"\nDone! {yaml_path}")

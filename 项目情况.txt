@@ -4,7 +4,7 @@
 第三，使用多模态的传感器对于冰箱内部的食材健康度进行评估……
 
 #YOLO进行图像识别
-类别+位置IoU 前后帧对比推断“存入/取出”操作
+类别+位置IoU 前后帧对比推断"存入/取出"操作
 目前phase0已经在PC端进行了简单验证，反映出两点问题：
 一是精度，必须制作自己的纯净数据集；
 二是模型大小，考虑尝试在stm32h743本地进行推理，即要求模型大小在2MB以内
@@ -22,28 +22,33 @@
 #当前进度 — 基线训练
 
 ## 数据集
-整合了两个公开数据源，存放在 datasets/fridge_36/，36 个类别：
-- Roboflow（冰箱/食材场景）
-- Kaggle Fruit 360（水果）
-总计 ~12,811 训练图 / ~1,274 验证图
+v1: 整合 Roboflow + Kaggle Fruit 360 → datasets/fridge_36/，36 类
+    ~12,811 训练图 / ~1,274 验证图，81.5× 类不平衡
+
+v2: datasets/fridge_33_v2/，33 类（数据平衡优化）
+    - 合并: leafy_greens (mustard_greens+water_morning_glory+amaranth)
+            mushroom (common_mushrooms+shiitake_mushroom)
+    - 降采样: 水果头部类图片 cap=1500 (Orange 2105→1500, Apple 1845→1500, Grape 1742→1500)
+    - 保留 13,736 张图 (train=11,832, valid=1,149, test=755)
+    - 标签不平衡: 81.5× → 58.3× (训练时用 fl_gamma 应对)
 
 ## 知识蒸馏训练(env:anaconda:fridge_ai)
-采用两阶段策略（train_kd.py）：
+两阶段策略（train_kd.py）：
 - Stage 1：YOLO11m 教师模型（20M 参数，~68 GFLOPs）
 - Stage 2：YOLO11n 学生模型（KD 损失 = 分类 KL 散度 + 框回归 MSE）
 
-### 训练策略优化（基于 v1 结果）
-| 版本 | 问题 | 改进 |
-|------|------|------|
-| v1 | 150 epoch 在 40 epoch 过拟合 | v2: 100 epoch, cos_lr, warmup=3, mixup=0.1 |
-| v1 | 教师 NMS 后得分低 | v2: 去掉 NMS，计算 KD 用 NMS 前 raw logits |
-| v1 | 蒸馏权重不平衡 | v2: cls_kd=10.0, box_kd=8.0（调高分类蒸馏） |
+### 训练策略迭代
+| 版本 | 数据集 | 关键改进 | Stage 1 结果 |
+|------|--------|---------|-------------|
+| v1 | fridge_36 (36类) | 基线 | mAP50=0.756, epoch 60 早停 |
+| v2 | fridge_36 (36类) | cos_lr, mixup, AMP patch, workers=8 | mAP50=0.774, mAP50-95=0.678, epoch 60 峰值→90 早停 |
+| v3 | fridge_33_v2 (33类) | 数据平衡 + fl_gamma=1.5 + multi_scale + dropout=0.1 | 待训练 |
 
-### v2 教师训练（进行中）
-- 模型：YOLO11m @ batch=16, imgsz=640
-- 当前进度：epoch 25/100，mAP50=0.714, mAP50-95=0.607
-- 已修复：check_amp 离线环境下载 yolo26n.pt 阻断训练的问题
-- 权重路径：runs/detect/runs/detect/fridge36_11m_v2/
+### v3 教师训练（待启动）
+- 数据集: datasets/fridge_33_v2/
+- 模型: YOLO11m @ batch=16, imgsz=640
+- v3 新增: fl_gamma=1.5, multi_scale=True, dropout=0.1, weight_decay=0.001, warmup_epochs=5
+- 权重路径: runs/detect/fridge33_11m_v3/
 
 ## 下一步
-基线完成后 → 自制数据集 → 重新训练 → 量化 → 转 STM32 推理模型
+v3 基线完成 → 补充公开数据 → 自制数据集 → 量化 → 转 STM32 推理模型
