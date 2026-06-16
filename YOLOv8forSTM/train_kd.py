@@ -384,7 +384,7 @@ if __name__ == "__main__":
             sys.exit(1)
         print(f"[RESUME] 从 {args.resume} 恢复训练")
         model = YOLO(args.resume)
-        model.train(resume=True, workers=8)
+        model.train(resume=True, workers=4)
         sys.exit(0)
 
     if args.stage is None and args.resume is None:
