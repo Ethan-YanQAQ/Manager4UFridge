@@ -56,6 +56,7 @@ progress.md
 .planning/
 
 # ===== 本地配置 =====
+CLAUDE.md
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/
