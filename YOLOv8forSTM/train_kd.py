@@ -282,16 +282,7 @@ class KDTrainer(DetectionTrainer):
 
 
 def run_stage1():
-    """训练 YOLO11m 教师模型（v3：数据平衡 + 训练策略改进）。
-
-    v3 改进：
-      - 数据集 36→33 类：合并尾部类 + 降采样水果头部(cap=1500)
-      - fl_gamma=1.5：Focal Loss 对抗 58× 标签不平衡
-      - multi_scale=True：多尺度训练提升泛化
-      - dropout=0.1：分类头正则化
-      - weight_decay=0.001：更强权重衰减
-      - warmup_epochs=5：更充分预热
-    """
+    """训练 YOLO11l 教师模型（v3：数据平衡 + 训练策略改进）。"""
     print("=" * 60)
     print("Stage 1: 训练 YOLO11m 教师模型 (v3)")
     print("=" * 60)
@@ -304,7 +295,7 @@ def run_stage1():
         batch=16,
         imgsz=640,
         device=0,
-        workers=0,
+        workers=8,
         cos_lr=True,
         close_mosaic=15,
         patience=30,
@@ -313,8 +304,8 @@ def run_stage1():
         dropout=0.1,
         weight_decay=0.001,
         warmup_epochs=5,
-        project="runs/detect",
-        name="fridge33_11m_v3",
+        project="runs",
+        name="fridge33_11l_v3",
         exist_ok=True,
     )
     return results
@@ -336,10 +327,10 @@ def run_stage2(teacher_path):
     results = model.train(
         data="datasets/fridge_33_v2/dataset.yaml",
         epochs=100,
-        batch=20,
+        batch=16,
         imgsz=640,
         device=0,
-        workers=4,
+        workers=8,
         cos_lr=True,
         close_mosaic=10,
         patience=25,
@@ -347,7 +338,7 @@ def run_stage2(teacher_path):
         lrf=0.1,
         mixup=0.15,
         copy_paste=0.1,
-        project="runs/detect",
+        project="runs",
         name="fridge33_11n_kd_v3",
         exist_ok=True,
         # --- KD 自定义参数 ---
@@ -397,9 +388,8 @@ if __name__ == "__main__":
         if teacher is None:
             # 自动查找 Stage 1 best（按优先级：v2 > v1）
             candidates = [
-                "runs/detect/fridge33_11m_v3/weights/best.pt",
-                "runs/detect/fridge36_11m_v2/weights/best.pt",
-                "runs/detect/fridge36_11m_teacher/weights/best.pt",
+                "runs/detect/fridge33_11l_v3/weights/best.pt",
+                "runs/detect/fridge33_11m_v2/weights/best.pt",
             ]
             for c in candidates:
                 if os.path.exists(c):
