@@ -284,15 +284,15 @@ class KDTrainer(DetectionTrainer):
 def run_stage1():
     """训练 YOLO11l 教师模型（v3：数据平衡 + 训练策略改进）。"""
     print("=" * 60)
-    print("Stage 1: 训练 YOLO11m 教师模型 (v3)")
+    print("Stage 1: 训练 YOLO11l 教师模型 (v3)")
     print("=" * 60)
 
-    model = YOLO("yolo11m.pt")
+    model = YOLO("yolo11l.pt")
 
     results = model.train(
-        data="datasets/fridge_33_v2/dataset.yaml",
+        data="datasets/fridge_33_v3/dataset.yaml",
         epochs=100,
-        batch=16,
+        batch=14,
         imgsz=640,
         device=0,
         workers=8,
@@ -305,7 +305,7 @@ def run_stage1():
         weight_decay=0.001,
         warmup_epochs=5,
         project="runs",
-        name="fridge33_11l_v3",
+        name="fridge33_11l_v3_retrain",
         exist_ok=True,
     )
     return results
@@ -325,7 +325,7 @@ def run_stage2(teacher_path):
     model = YOLO("yolo11n.pt")
 
     results = model.train(
-        data="datasets/fridge_33_v2/dataset.yaml",
+        data="datasets/fridge_33_v3/dataset.yaml",
         epochs=100,
         batch=16,
         imgsz=640,
