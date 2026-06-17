@@ -28,6 +28,7 @@ Release/
 **/datasets/
 **/runs/
 *.zip
+*.tar.gz
 *.pt
 *.db
 *.sqlite
