@@ -284,18 +284,19 @@ class KDTrainer(DetectionTrainer):
 def run_stage1():
     """训练 YOLO11l 教师模型（v3：数据平衡 + 训练策略改进）。"""
     print("=" * 60)
-    print("Stage 1: 训练 YOLO11l 教师模型 (v3)")
+    print("Stage 1: 训练 YOLO11l 教师模型 (v4)")
     print("=" * 60)
 
     model = YOLO("yolo11l.pt")
 
     results = model.train(
-        data="datasets/fridge_33_v3/dataset.yaml",
+        data="datasets/fridge_33_v4/dataset.yaml",
         epochs=100,
         batch=14,
         imgsz=640,
         device=0,
         workers=8,
+        cache=True,
         cos_lr=True,
         close_mosaic=15,
         patience=30,
@@ -304,8 +305,8 @@ def run_stage1():
         dropout=0.1,
         weight_decay=0.001,
         warmup_epochs=5,
-        project="runs",
-        name="fridge33_11l_v3_retrain",
+        project="/root/YOLOv8forSTM/runs",
+        name="fridge33_11l_v4",
         exist_ok=True,
     )
     return results
@@ -325,7 +326,7 @@ def run_stage2(teacher_path):
     model = YOLO("yolo11n.pt")
 
     results = model.train(
-        data="datasets/fridge_33_v3/dataset.yaml",
+        data="datasets/fridge_33_v4/dataset.yaml",
         epochs=100,
         batch=16,
         imgsz=640,
@@ -338,8 +339,8 @@ def run_stage2(teacher_path):
         lrf=0.1,
         mixup=0.15,
         copy_paste=0.1,
-        project="runs",
-        name="fridge33_11n_kd_v3",
+        project="/root/YOLOv8forSTM/runs",
+        name="fridge33_11n_kd_v4",
         exist_ok=True,
         # --- KD 自定义参数 ---
         trainer=KDTrainer,

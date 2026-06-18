@@ -54,6 +54,7 @@ task_plan.md
 findings.md
 progress.md
 .planning/
+*.txt
 
 # ===== 本地配置 =====
 CLAUDE.md
