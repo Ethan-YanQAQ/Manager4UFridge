@@ -1,0 +1,11 @@
+# Fridge v6: merged from Roboflow v1+v4 + Fruit detection
+# Pipeline: dedup ¡ú class merge/delete ¡ú remove high-density fruit
+# MD5 dedup across all sources, v4 priority over v1
+
+path: /root/YOLOv8forSTM/datasets/fridge_v6
+train: images/train
+val: images/valid
+test: images/test
+
+nc: 28
+names: ['beef', 'pork', 'poultry', 'fish', 'shrimp', 'eel_seacrab', 'egg', 'tofu', 'bean_sprouts', 'cabbage', 'carrot', 'cauliflower_broccoli', 'corn', 'cucumber', 'eggplant', 'allium', 'potato', 'tomato', 'pumpkin', 'bitter_gourd', 'leafy_greens', 'mushroom', 'Apple', 'Banana', 'Grape', 'Orange', 'Pineapple', 'Watermelon']
