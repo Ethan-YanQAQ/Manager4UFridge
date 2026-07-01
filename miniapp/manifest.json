@@ -1,0 +1,15 @@
+{
+  "name": "冰箱食材管理",
+  "appid": "__YOUR_WECHAT_APPID__",
+  "description": "智能冰箱食材库存查看、新鲜度预警、存取记录",
+  "versionName": "1.0.0",
+  "mp-weixin": {
+    "appid": "__YOUR_WECHAT_APPID__",
+    "cloudfunctionRoot": "cloudfunctions/",
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "minified": true
+    }
+  }
+}

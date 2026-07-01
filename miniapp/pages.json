@@ -1,0 +1,25 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": { "navigationBarTitleText": "我的冰箱" }
+    },
+    {
+      "path": "pages/inventory/inventory",
+      "style": { "navigationBarTitleText": "库存列表" }
+    },
+    {
+      "path": "pages/history/history",
+      "style": { "navigationBarTitleText": "存取记录" }
+    }
+  ],
+  "tabBar": {
+    "color": "#999",
+    "selectedColor": "#07c160",
+    "list": [
+      { "pagePath": "pages/index/index", "text": "🏠 首页" },
+      { "pagePath": "pages/inventory/inventory", "text": "🧊 库存" },
+      { "pagePath": "pages/history/history", "text": "📋 记录" }
+    ]
+  }
+}

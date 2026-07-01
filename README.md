@@ -8,7 +8,7 @@
 |------|------|------|
 | 食材录入与识别 | YOLO 视觉识别 + IoU 前后帧对比，自动判定存取操作 | 🚧 开发中 |
 | 食材时效管理 | 记录存放时间，可视化展示，腐坏预警 | 🚧 开发中 |
-| 线上提醒 | 微信小程序 + 智能体推送 | 📋 计划中 |
+| 线上提醒 | 微信小程序 + 微信云开发 | 🚧 开发中 |
 | 变质检测 | MQ135/MQ137 气体传感器多模态评估 | 📋 计划中 |
 
 ## 硬件方案
@@ -48,6 +48,12 @@ Manager4UFridge/
 │   ├── ssh_server.py            # SSH 远程训练管理（不入库）
 │   ├── v6_results/              # 训练结果（yaml/csv，权重不入库）
 │   └── datasets/                # 训练数据集（不入库）
+│
+├── miniapp/                     # 微信小程序（uni-app + Vue3 + 微信云开发）
+│   ├── pages/                   # 页面：首页、库存、历史
+│   ├── cloudfunctions/          # 云函数：getInventory、getHistory、addDetection
+│   ├── manifest.json            # uni-app 配置
+│   └── package.json             # 依赖（Vue3 + Pinia）
 │
 ├── .gitignore                   # Git 忽略规则
 └── README.md
