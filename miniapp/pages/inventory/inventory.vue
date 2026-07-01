@@ -98,7 +98,7 @@ export default {
     async loadData() {
       try {
         var db = wx.cloud.database()
-        var res = await db.collection('inventory').orderBy('daysStored', 'desc').get()
+        var res = await db.collection('inventory').orderBy('daysStored', 'desc').limit(200).get()
         this.items = res.data
       } catch (e) { console.error(e) }
       finally { this.loading = false }

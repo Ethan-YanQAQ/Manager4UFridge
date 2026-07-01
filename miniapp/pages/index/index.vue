@@ -19,18 +19,18 @@
       </view>
 
       <view class="stats-grid">
-        <view class="stat-card total animate-in" style="animation-delay: 0.1s">
+        <view class="stat-card total animate-in" style="animation-delay: 0.1s" @click="goTab('inventory')">
           <view class="stat-badge" style="background: var(--color-sage-light)">
             <text class="stat-num">{{ totalCount }}</text>
           </view>
           <text class="stat-label">库存</text>
         </view>
         <view class="stat-card-side">
-          <view class="stat-card-sm warning animate-in" style="animation-delay: 0.15s">
+          <view class="stat-card-sm warning animate-in" style="animation-delay: 0.15s" @click="goTab('inventory')">
             <text class="stat-num-sm">{{ warningCount }}</text>
             <text class="stat-label-sm">预警</text>
           </view>
-          <view class="stat-card-sm expired animate-in" style="animation-delay: 0.2s">
+          <view class="stat-card-sm expired animate-in" style="animation-delay: 0.2s" @click="goTab('inventory')">
             <text class="stat-num-sm">{{ expiredCount }}</text>
             <text class="stat-label-sm">过期</text>
           </view>
@@ -63,8 +63,13 @@
         </view>
 
         <!-- 加载态 -->
-        <view v-if="aiLoading" class="ai-loading">
+        <view v-if="aiLoading" class="ai-loading" @click="loadAI">
           <text class="ai-thinking">🤔 正在分析你的冰箱...</text>
+        </view>
+
+        <!-- 错误态 -->
+        <view v-else-if="aiError" class="ai-loading" @click="loadAI">
+          <text class="ai-thinking">AI 暂不可用，点击重试</text>
         </view>
 
         <!-- AI 三个 Tab -->
@@ -114,7 +119,9 @@ export default {
     }
   },
   onShow() { this.loadData() },
+  onPullDownRefresh() { this.loadData().then(function() { uni.stopPullDownRefresh() }) },
   methods: {
+    goTab(tab) { uni.switchTab({ url: '/pages/' + tab + '/' + tab }) },
     getEmoji(cls) {
       var m = { Apple: '🍎', Banana: '🍌', Grape: '🍇', Orange: '🍊', Pineapple: '🍍', Watermelon: '🍉', beef: '🥩', pork: '🥩', poultry: '🍗', fish: '🐟', shrimp: '🦐', eel_seacrab: '🦀', egg: '🥚', tofu: '🧈', cabbage: '🥬', carrot: '🥕', cauliflower_broccoli: '🥦', corn: '🌽', cucumber: '🥒', eggplant: '🍆', allium: '🧅', potato: '🥔', tomato: '🍅', pumpkin: '🎃', bitter_gourd: '🥒', leafy_greens: '🥬', mushroom: '🍄', bean_sprouts: '🌱' }
       return m[cls] || '📦'
@@ -128,9 +135,10 @@ export default {
       return Math.floor(h / 24) + '天前'
     },
     async loadData() {
+      wx.showLoading({ title: '加载中...' })
       try {
         var db = wx.cloud.database()
-        var invRes = await db.collection('inventory').get()
+        var invRes = await db.collection('inventory').limit(200).get()
         var items = invRes.data
         this.totalCount = items.length
         this.warningCount = items.filter(function(i) { return i.freshness === 'WARNING' }).length
@@ -139,20 +147,21 @@ export default {
           var latest = items.reduce(function(a, b) { return new Date(a.addedAt) > new Date(b.addedAt) ? a : b })
           this.lastUpdate = this.formatTime(latest.addedAt)
         }
-        var histRes = await db.collection('history').orderBy('timestamp', 'desc').limit(8).get()
+        var histRes = await db.collection('history').orderBy('timestamp', 'desc').limit(50).get()
         this.recentHistory = histRes.data
 
-        // 加载 AI 分析（有缓存则跳过）
+        // 加载 AI 分析
         this.loadAI()
       } catch (e) {
-        console.error(e)
+        console.error('Load error:', e)
+        wx.showToast({ title: '加载失败,请下拉刷新', icon: 'none', duration: 2000 })
       } finally {
+        wx.hideLoading()
         this.loading = false
       }
     },
     async loadAI() {
       try {
-        // 检查缓存（1小时内不重复请求）
         var cached = uni.getStorageSync('aiCache')
         if (cached && cached.time && (Date.now() - cached.time < 3600000)) {
           this.aiData = cached.data
@@ -160,13 +169,15 @@ export default {
           return
         }
         var res = await wx.cloud.callFunction({ name: 'aiAdvisor' })
-        if (res.result && res.result.data) {
+        if (res.result && res.result.ok && res.result.data) {
           this.aiData = res.result.data
           uni.setStorageSync('aiCache', { time: Date.now(), data: res.result.data })
+        } else {
+          this.aiData = { analysis: 'AI 助手暂无可分析内容', recipes: [], shopping: [] }
         }
       } catch (e) {
-        console.error('AI load error:', e)
-        this.aiData = { analysis: 'AI 助手暂时不可用', recipes: [], shopping: [] }
+        console.error('AI error:', e)
+        this.aiData = { analysis: 'AI 助手暂时不可用,下拉刷新重试', recipes: [], shopping: [] }
       } finally {
         this.aiLoading = false
       }
