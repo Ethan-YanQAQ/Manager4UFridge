@@ -11,6 +11,10 @@
     {
       "path": "pages/history/history",
       "style": { "navigationBarTitleText": "存取记录" }
+    },
+    {
+      "path": "pages/alerts/alerts",
+      "style": { "navigationBarTitleText": "预警与过期" }
     }
   ],
   "tabBar": {

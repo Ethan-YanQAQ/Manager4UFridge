@@ -26,11 +26,11 @@
           <text class="stat-label">库存</text>
         </view>
         <view class="stat-card-side">
-          <view class="stat-card-sm warning animate-in" style="animation-delay: 0.15s" @click="goTab('inventory')">
+          <view class="stat-card-sm warning animate-in" style="animation-delay: 0.15s" @click="goPage('alerts')">
             <text class="stat-num-sm">{{ warningCount }}</text>
             <text class="stat-label-sm">预警</text>
           </view>
-          <view class="stat-card-sm expired animate-in" style="animation-delay: 0.2s" @click="goTab('inventory')">
+          <view class="stat-card-sm expired animate-in" style="animation-delay: 0.2s" @click="goPage('alerts')">
             <text class="stat-num-sm">{{ expiredCount }}</text>
             <text class="stat-label-sm">过期</text>
           </view>
@@ -151,14 +151,14 @@ export default {
         var histRes = await db.collection('history').orderBy('timestamp', 'desc').limit(50).get()
         this.recentHistory = histRes.data
 
-        // 加载 AI 分析
-        this.loadAI()
       } catch (e) {
         console.error('Load error:', e)
         wx.showToast({ title: '加载失败,请下拉刷新', icon: 'none', duration: 2000 })
       } finally {
         wx.hideLoading()
         this.loading = false
+        // AI 延迟加载，不阻塞首页
+        setTimeout(() => { this.loadAI() }, 1000)
       }
     },
     async loadAI() {
