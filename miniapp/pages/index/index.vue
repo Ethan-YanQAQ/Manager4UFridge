@@ -54,6 +54,46 @@
           <text class="item-time">{{ formatTime(item.timestamp) }}</text>
         </view>
       </view>
+
+      <!-- AI 智能体卡片 -->
+      <view class="ai-card animate-in" style="animation-delay: 0.35s">
+        <view class="ai-header">
+          <text class="ai-title">AI 助手</text>
+          <text class="ai-subtitle" v-if="aiData">{{ aiData.analysis ? '已分析' : '加载中...' }}</text>
+        </view>
+
+        <!-- 加载态 -->
+        <view v-if="aiLoading" class="ai-loading">
+          <text class="ai-thinking">🤔 正在分析你的冰箱...</text>
+        </view>
+
+        <!-- AI 三个 Tab -->
+        <view v-else-if="aiData" class="ai-body">
+          <view class="ai-tabs">
+            <text class="ai-tab" :class="{ active: aiTab === 'analysis' }" @click="aiTab = 'analysis'">库存分析</text>
+            <text class="ai-tab" :class="{ active: aiTab === 'recipes' }" @click="aiTab = 'recipes'">推荐菜谱</text>
+            <text class="ai-tab" :class="{ active: aiTab === 'shopping' }" @click="aiTab = 'shopping'">采购建议</text>
+          </view>
+
+          <view class="ai-content">
+            <text v-if="aiTab === 'analysis'" class="ai-text">{{ aiData.analysis }}</text>
+            <view v-if="aiTab === 'recipes'">
+              <view v-for="(r, i) in aiData.recipes" :key="i" class="ai-recipe">
+                <text class="ai-recipe-name">🍳 {{ r.name }}</text>
+                <text class="ai-recipe-info">用料: {{ r.ingredients.join(', ') }}</text>
+              </view>
+              <text v-if="!aiData.recipes || aiData.recipes.length === 0" class="ai-text">暂无菜谱推荐</text>
+            </view>
+            <view v-if="aiTab === 'shopping'">
+              <view v-for="(s, i) in aiData.shopping" :key="i" class="ai-shop-item">
+                <text class="ai-shop-name">{{ s.priority === '高' ? '🔴' : s.priority === '中' ? '🟡' : '🟢' }} {{ s.name }}</text>
+                <text class="ai-shop-reason">{{ s.reason }}</text>
+              </view>
+              <text v-if="!aiData.shopping || aiData.shopping.length === 0" class="ai-text">暂无采购建议</text>
+            </view>
+          </view>
+        </view>
+      </view>
     </template>
   </view>
 </template>
@@ -67,13 +107,16 @@ export default {
       warningCount: 0,
       expiredCount: 0,
       lastUpdate: '--',
-      recentHistory: []
+      recentHistory: [],
+      aiLoading: true,
+      aiTab: 'analysis',
+      aiData: null
     }
   },
   onShow() { this.loadData() },
   methods: {
     getEmoji(cls) {
-      const m = { Apple: '🍎', Banana: '🍌', Grape: '🍇', Orange: '🍊', Pineapple: '🍍', Watermelon: '🍉', beef: '🥩', pork: '🥩', poultry: '🍗', fish: '🐟', shrimp: '🦐', eel_seacrab: '🦀', egg: '🥚', tofu: '🧈', cabbage: '🥬', carrot: '🥕', cauliflower_broccoli: '🥦', corn: '🌽', cucumber: '🥒', eggplant: '🍆', allium: '🧅', potato: '🥔', tomato: '🍅', pumpkin: '🎃', bitter_gourd: '🥒', leafy_greens: '🥬', mushroom: '🍄', bean_sprouts: '🌱' }
+      var m = { Apple: '🍎', Banana: '🍌', Grape: '🍇', Orange: '🍊', Pineapple: '🍍', Watermelon: '🍉', beef: '🥩', pork: '🥩', poultry: '🍗', fish: '🐟', shrimp: '🦐', eel_seacrab: '🦀', egg: '🥚', tofu: '🧈', cabbage: '🥬', carrot: '🥕', cauliflower_broccoli: '🥦', corn: '🌽', cucumber: '🥒', eggplant: '🍆', allium: '🧅', potato: '🥔', tomato: '🍅', pumpkin: '🎃', bitter_gourd: '🥒', leafy_greens: '🥬', mushroom: '🍄', bean_sprouts: '🌱' }
       return m[cls] || '📦'
     },
     formatTime(ts) {
@@ -98,10 +141,34 @@ export default {
         }
         var histRes = await db.collection('history').orderBy('timestamp', 'desc').limit(8).get()
         this.recentHistory = histRes.data
+
+        // 加载 AI 分析（有缓存则跳过）
+        this.loadAI()
       } catch (e) {
         console.error(e)
       } finally {
         this.loading = false
+      }
+    },
+    async loadAI() {
+      try {
+        // 检查缓存（1小时内不重复请求）
+        var cached = uni.getStorageSync('aiCache')
+        if (cached && cached.time && (Date.now() - cached.time < 3600000)) {
+          this.aiData = cached.data
+          this.aiLoading = false
+          return
+        }
+        var res = await wx.cloud.callFunction({ name: 'aiAdvisor' })
+        if (res.result && res.result.data) {
+          this.aiData = res.result.data
+          uni.setStorageSync('aiCache', { time: Date.now(), data: res.result.data })
+        }
+      } catch (e) {
+        console.error('AI load error:', e)
+        this.aiData = { analysis: 'AI 助手暂时不可用', recipes: [], shopping: [] }
+      } finally {
+        this.aiLoading = false
       }
     }
   }
@@ -144,4 +211,23 @@ export default {
 .item-name { font-size: 30rpx; }
 .item-action-text { font-size: 24rpx; display: block; margin-top: 2rpx; }
 .item-time { font-family: var(--font-mono); font-size: 22rpx; color: var(--color-text-tertiary); }
+
+/* === AI 卡片 === */
+.ai-card { background: linear-gradient(135deg, #F5F7FA 0%, #E8EEE4 100%); border-radius: var(--radius-lg); padding: 32rpx; margin-top: 24rpx; box-shadow: var(--shadow-card); }
+.ai-header { display: flex; align-items: center; gap: 12rpx; margin-bottom: 20rpx; }
+.ai-title { font-family: var(--font-display); font-size: 34rpx; }
+.ai-subtitle { font-size: 22rpx; color: var(--color-text-tertiary); }
+.ai-loading { text-align: center; padding: 40rpx 0; }
+.ai-thinking { font-size: 28rpx; color: var(--color-text-secondary); }
+.ai-tabs { display: flex; gap: 12rpx; margin-bottom: 20rpx; }
+.ai-tab { padding: 10rpx 24rpx; border-radius: 20rpx; font-size: 24rpx; background: rgba(255,255,255,0.6); color: var(--color-text-secondary); }
+.ai-tab.active { background: var(--color-accent); color: #fff; }
+.ai-content { background: rgba(255,255,255,0.5); border-radius: var(--radius-sm); padding: 20rpx; }
+.ai-text { font-size: 26rpx; line-height: 1.8; color: var(--color-text-secondary); }
+.ai-recipe { padding: 12rpx 0; border-bottom: 1rpx solid rgba(0,0,0,0.04); }
+.ai-recipe-name { font-size: 28rpx; font-weight: 500; display: block; }
+.ai-recipe-info { font-size: 24rpx; color: var(--color-text-tertiary); display: block; margin-top: 4rpx; }
+.ai-shop-item { padding: 12rpx 0; border-bottom: 1rpx solid rgba(0,0,0,0.04); }
+.ai-shop-name { font-size: 28rpx; font-weight: 500; display: block; }
+.ai-shop-reason { font-size: 24rpx; color: var(--color-text-tertiary); display: block; margin-top: 4rpx; }
 </style>
