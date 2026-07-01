@@ -19,6 +19,10 @@ Release/
 *.launch
 **/Drivers/CMSIS/
 
+# ===== Node / 小程序 =====
+**/node_modules/
+**/unpackage/
+
 # ===== Python =====
 **/__pycache__/
 *.pyc

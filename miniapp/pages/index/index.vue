@@ -114,6 +114,7 @@ export default {
       lastUpdate: '--',
       recentHistory: [],
       aiLoading: true,
+      aiError: false,
       aiTab: 'analysis',
       aiData: null
     }
@@ -161,6 +162,8 @@ export default {
       }
     },
     async loadAI() {
+      this.aiLoading = true
+      this.aiError = false
       try {
         var cached = uni.getStorageSync('aiCache')
         if (cached && cached.time && (Date.now() - cached.time < 3600000)) {
@@ -177,7 +180,7 @@ export default {
         }
       } catch (e) {
         console.error('AI error:', e)
-        this.aiData = { analysis: 'AI 助手暂时不可用,下拉刷新重试', recipes: [], shopping: [] }
+        this.aiError = true
       } finally {
         this.aiLoading = false
       }
