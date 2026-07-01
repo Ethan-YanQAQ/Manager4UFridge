@@ -26,11 +26,11 @@
           <text class="stat-label">库存</text>
         </view>
         <view class="stat-card-side">
-          <view class="stat-card-sm warning animate-in" style="animation-delay: 0.15s" @click="goPage('alerts')">
+          <view class="stat-card-sm warning animate-in" style="animation-delay: 0.15s" @click="goTab('inventory')">
             <text class="stat-num-sm">{{ warningCount }}</text>
             <text class="stat-label-sm">预警</text>
           </view>
-          <view class="stat-card-sm expired animate-in" style="animation-delay: 0.2s" @click="goPage('alerts')">
+          <view class="stat-card-sm expired animate-in" style="animation-delay: 0.2s" @click="goTab('inventory')">
             <text class="stat-num-sm">{{ expiredCount }}</text>
             <text class="stat-label-sm">过期</text>
           </view>
@@ -59,6 +59,7 @@
       <view class="ai-card animate-in" style="animation-delay: 0.35s">
         <view class="ai-header">
           <text class="ai-title">AI 助手</text>
+          <text class="ai-chat-btn" @click="goChat">💬 对话</text>
           <text class="ai-subtitle" v-if="aiData">{{ aiData.analysis ? '已分析' : '加载中...' }}</text>
         </view>
 
@@ -123,6 +124,7 @@ export default {
   onPullDownRefresh() { this.loadData().then(function() { uni.stopPullDownRefresh() }) },
   methods: {
     goTab(tab) { uni.switchTab({ url: '/pages/' + tab + '/' + tab }) },
+	goChat() { uni.navigateTo({ url: '/pages/chat/chat' }) },
     getEmoji(cls) {
       var m = { Apple: '🍎', Banana: '🍌', Grape: '🍇', Orange: '🍊', Pineapple: '🍍', Watermelon: '🍉', beef: '🥩', pork: '🥩', poultry: '🍗', fish: '🐟', shrimp: '🦐', eel_seacrab: '🦀', egg: '🥚', tofu: '🧈', cabbage: '🥬', carrot: '🥕', cauliflower_broccoli: '🥦', corn: '🌽', cucumber: '🥒', eggplant: '🍆', allium: '🧅', potato: '🥔', tomato: '🍅', pumpkin: '🎃', bitter_gourd: '🥒', leafy_greens: '🥬', mushroom: '🍄', bean_sprouts: '🌱' }
       return m[cls] || '📦'
@@ -229,7 +231,8 @@ export default {
 /* === AI 卡片 === */
 .ai-card { background: linear-gradient(135deg, #F5F7FA 0%, #E8EEE4 100%); border-radius: var(--radius-lg); padding: 32rpx; margin-top: 24rpx; box-shadow: var(--shadow-card); }
 .ai-header { display: flex; align-items: center; gap: 12rpx; margin-bottom: 20rpx; }
-.ai-title { font-family: var(--font-display); font-size: 34rpx; }
+.ai-title { font-family: var(--font-display); font-size: 34rpx; flex:1; }
+.ai-chat-btn { padding: 8rpx 20rpx; background: rgba(125,155,118,0.15); border-radius: 20rpx; font-size: 24rpx; color: var(--color-accent); }
 .ai-subtitle { font-size: 22rpx; color: var(--color-text-tertiary); }
 .ai-loading { text-align: center; padding: 40rpx 0; }
 .ai-thinking { font-size: 28rpx; color: var(--color-text-secondary); }

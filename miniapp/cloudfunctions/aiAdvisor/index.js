@@ -18,7 +18,40 @@ if (!DEEPSEEK_API_KEY) {
 
 exports.main = async (event, context) => {
   try {
-    // 1. 读取库存数据（限制条数，避免超时）
+    // === 对话模式 ===
+    if (event.chat) {
+      const userMessage = event.message || ''
+      const chatHistory = event.history || []
+
+      // 读取库存上下文
+      const invRes = await db.collection('inventory').limit(50).get()
+      const inventory = invRes.data
+      const invCtx = inventory.length === 0 ? '冰箱是空的' : inventory.map(i =>
+        `${i.class}: ${i.count||1}件, ${i.daysStored}天, ${i.freshness}`
+      ).join('; ')
+
+      // history 已含当前用户消息，去掉最后一条避免重复
+      var prevMsgs = chatHistory.slice(0, -1)
+      const msgs = [
+        { role: 'system', content: `你是冰箱管理助手。当前库存: ${invCtx}。简短友好回复，不超过200字。` },
+        ...prevMsgs.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content })),
+        { role: 'user', content: userMessage }
+      ]
+
+      const aiRes = await require('axios').post(DEEPSEEK_URL, {
+        model: 'deepseek-chat',
+        messages: msgs,
+        temperature: 0.7,
+        max_tokens: 500
+      }, {
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${DEEPSEEK_API_KEY}` },
+        timeout: 15000
+      })
+
+      return { ok: true, data: { reply: aiRes.data.choices[0].message.content } }
+    }
+
+    // === 分析模式（原逻辑）===
     const invRes = await db.collection('inventory').limit(200).get()
     const inventory = invRes.data
 

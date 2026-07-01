@@ -15,6 +15,10 @@
     {
       "path": "pages/alerts/alerts",
       "style": { "navigationBarTitleText": "预警与过期" }
+    },
+    {
+      "path": "pages/chat/chat",
+      "style": { "navigationBarTitleText": "AI 对话" }
     }
   ],
   "tabBar": {

@@ -31,6 +31,10 @@ page {
   --shadow-card:        0 2rpx 16rpx rgba(44,36,22,0.06);
   --ease-spring:        cubic-bezier(0.16, 1, 0.3, 1);
 
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
   background: var(--color-bg);
   font-family: var(--font-body);
   font-size: 28rpx;
