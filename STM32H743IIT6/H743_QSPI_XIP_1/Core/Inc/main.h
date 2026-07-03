@@ -58,6 +58,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define OV2640_PWDN_Pin GPIO_PIN_6
+#define OV2640_PWDN_GPIO_Port GPIOH
+#define OV2640_RST_Pin GPIO_PIN_7
+#define OV2640_RST_GPIO_Port GPIOH
+#define Magnetic_Pin GPIO_PIN_9
+#define Magnetic_GPIO_Port GPIOG
 
 /* USER CODE BEGIN Private defines */
 typedef int32_t  s32;

@@ -18,7 +18,7 @@
 
 | 组件 | 型号 | 关键参数 | 接口 |
 |------|------|---------|------|
-| 主控 | STM32H743VIT6 | Cortex-M7, 480MHz, 2MB Flash, 1MB SRAM, LQFP100 | — |
+| 主控 | STM32H743IIT6 | Cortex-M7, 480MHz, 2MB Flash, 1MB SRAM, LQFP176 | — |
 | 晶振 | 无源 25MHz | HSE, 经 PLL 倍频至 480MHz | OSC_IN/OUT |
 | 外部存储 | **W25Q256JV** | 32MB NOR Flash, 133MHz, Quad SPI | QSPI @ 0x90000000 |
 | WiFi | ESP-01S | AT 指令集, TCP/HTTP 透传 | UART |

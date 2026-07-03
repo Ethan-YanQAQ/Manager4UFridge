@@ -42,7 +42,7 @@ void MX_QUADSPI_Init(void)
 
   /* USER CODE END QUADSPI_Init 1 */
   hqspi.Instance = QUADSPI;
-  hqspi.Init.ClockPrescaler = 0;
+  hqspi.Init.ClockPrescaler = 1;
   hqspi.Init.FifoThreshold = 4;
   hqspi.Init.SampleShifting = QSPI_SAMPLE_SHIFTING_HALFCYCLE;
   hqspi.Init.FlashSize = 24;
@@ -662,7 +662,7 @@ uint8_t CSP_QSPI_Read(uint8_t *pData, uint32_t ReadAddr, uint32_t Size) {
 	s_command.Address = ReadAddr;
 	s_command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
 	s_command.DataMode = QSPI_DATA_4_LINES;
-	s_command.DummyCycles = 6U;
+	s_command.DummyCycles = 8U;
 	s_command.NbData = Size;
 	s_command.DdrMode = QSPI_DDR_MODE_DISABLE;
 	s_command.DdrHoldHalfCycle = QSPI_DDR_HHC_ANALOG_DELAY;

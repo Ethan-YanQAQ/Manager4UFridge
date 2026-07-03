@@ -21,8 +21,14 @@
 #include "main.h"
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
+#include "dcmi.h"
+#include "dma.h"
+#include "i2c.h"
 #include "quadspi.h"
+#include "usart.h"
 #include "gpio.h"
+#include "fmc.h"
+#include "app_x-cube-ai.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -60,12 +66,7 @@ void MX_FREERTOS_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-u8 writebuf[]={"Hello world from QSPI Memory Mapped Mode !"};
-u8 readbuf[100];
 
-typedef void(*pFunction)(void);
-pFunction JumpToApplication;
-#define APPLICATION_ADDRESS 0X90000000
 
 /* USER CODE END 0 */
 
@@ -82,11 +83,6 @@ int main(void)
 
   /* Enable the CPU Cache */
 
-  /* Enable I-Cache---------------------------------------------------------*/
-  SCB_EnableICache();
-
-  /* Enable D-Cache---------------------------------------------------------*/
-  SCB_EnableDCache();
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -94,6 +90,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+  MPU_Config();
 
   /* USER CODE END Init */
 
@@ -106,47 +103,20 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_QUADSPI_Init();
+  MX_FMC_Init();
+  MX_USART1_UART_Init();
+  MX_DCMI_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  if (CSP_QUADSPI_Init() != HAL_OK)
-  {
-	  Error_Handler();
-  }
+  SCB_EnableICache();
+  SCB_EnableDCache();
+  SDRAM_InitSequence();
+  CSP_QUADSPI_Init();
+  CSP_QSPI_EnableMemoryMappedMode();
+  MX_X_CUBE_AI_Init();
 
-  HAL_Delay(100);
-/*
-  if (CSP_QSPI_Erase_Chip() != HAL_OK)  //approx 13 second to execute
-  {
-	  Error_Handler();
-  }
-
-  if (CSP_QSPI_WriteMemory(writebuf, 0, sizeof(writebuf)) != HAL_OK)
-  {
-	  Error_Handler();
-  }
-
-  if (CSP_QSPI_Read(readbuf, 0, 100) != HAL_OK)
-  {
-	  Error_Handler();
-  }
-  */
-
-
-  if (CSP_QSPI_EnableMemoryMappedMode() != HAL_OK)
-  {
-	  Error_Handler();
-  }
-
- // memcpy(writebuf,(u8*)0x90000000,50);
-
-  SCB_DisableDCache();
-  SCB_DisableICache();
-
-  SysTick->CTRL=0;
-
-  JumpToApplication=(pFunction) (*(__IO u32*) (APPLICATION_ADDRESS+4));
-  __set_MSP(*(__IO u32*) APPLICATION_ADDRESS);
-  JumpToApplication();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -165,8 +135,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-	  HAL_Delay(1000);
   }
   /* USER CODE END 3 */
 }
@@ -186,6 +154,7 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
@@ -199,7 +168,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLM = 5;
   RCC_OscInitStruct.PLL.PLLN = 192;
   RCC_OscInitStruct.PLL.PLLP = 2;
-  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 20;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_2;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
@@ -215,20 +184,32 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
                               |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV2;
+  RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV1;
-  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV1;
+  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
+  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
   {
     Error_Handler();
   }
 }
 
 /* USER CODE BEGIN 4 */
+static void MPU_Config(void){
+    MPU_Region_InitTypeDef M={0};
+    HAL_MPU_Disable();
+    M.Enable=MPU_REGION_ENABLE; M.BaseAddress=0x90000000; M.Size=MPU_REGION_SIZE_16MB;
+    M.AccessPermission=MPU_REGION_FULL_ACCESS; M.IsBufferable=MPU_ACCESS_BUFFERABLE;
+    M.IsCacheable=MPU_ACCESS_CACHEABLE; M.IsShareable=MPU_ACCESS_NOT_SHAREABLE;
+    M.Number=MPU_REGION_NUMBER0; M.TypeExtField=MPU_TEX_LEVEL1; M.SubRegionDisable=0x00;
+    M.DisableExec=MPU_INSTRUCTION_ACCESS_ENABLE; HAL_MPU_ConfigRegion(&M);
+    M.BaseAddress=0xC0000000; M.Size=MPU_REGION_SIZE_32MB; M.Number=MPU_REGION_NUMBER1;
+    M.DisableExec=MPU_INSTRUCTION_ACCESS_DISABLE; HAL_MPU_ConfigRegion(&M);
+    HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+}
 
 /* USER CODE END 4 */
 
