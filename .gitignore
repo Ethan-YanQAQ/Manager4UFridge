@@ -11,13 +11,14 @@ Release/
 *.map
 *.list
 
-# ===== STM32CubeIDE =====
+# ===== STM32CubeIDE / CubeMX =====
 .settings/
 .cproject
 .mxproject
 .project
 *.launch
 **/Drivers/CMSIS/
+*.stldr
 
 # ===== Node / 小程序 =====
 **/node_modules/
@@ -27,16 +28,27 @@ Release/
 **/__pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+.eggs/
+dist/
 
-# ===== 数据集 & 模型（大文件，不应入库）=====
+# ===== 数据集 & 模型（大文件，不入库）=====
 **/datasets/
 **/runs/
 *.zip
 *.tar.gz
 *.pt
+*.tflite
+*.onnx
 *.db
 *.sqlite
 Phase_0/data/
+Phase_0/st_models/
+Phase_0/st_yolo_lc_v1/
+
+# ===== 外部参考工程 =====
+H743_QSPI_REF/
+Refcode/
 
 # ===== 临时文件 =====
 {AEC0BD37-C609-48A0-B56B-389194DA71B1}.png
@@ -53,16 +65,14 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-# ===== planning-with-files（本地工作记录）=====
+# ===== planning-with-files（本地工作记录，视需求可取消忽略）=====
 task_plan.md
 findings.md
 progress.md
 preferredSkills.md
 .planning/
-*.txt
 
 # ===== 本地配置 =====
-CLAUDE.md
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/
