@@ -19,6 +19,36 @@
 
 ## 硬件规格
 
+### 板级配置（已确认）
+
+| 组件 | 型号 | 参数 |
+|------|------|------|
+| 主控 | STM32H743VIT6 | LQFP100, 480MHz |
+| HSE 晶振 | 无源 **25MHz** | CubeMX HSE 填 25MHz |
+| QSPI Flash | **W25Q256JV** | 32MB, 133MHz, DummyCycles=8 |
+| 摄像头 | OV2640 | UXGA 1600×1200, SCCB, DCMI 8-bit |
+| WiFi | ESP-01S | AT 指令, UART 透传 |
+
+### 时钟树（CubeMX 配置）
+
+```
+HSE: 25MHz
+PLL1: /5 ×160 /2 = 480MHz → SYSCLK
+HCLK: /2 = 240MHz
+QSPI Kernel: D1HCLK /2 = 120MHz (SCK when Prescaler=0)
+```
+
+### QSPI 引脚（已确认）
+
+| 信号 | 引脚 | AF |
+|------|------|-----|
+| CLK | PB2 | AF9 |
+| NCS | PB10 | AF9 |
+| IO0 | PD11 | AF9 |
+| IO1 | PD12 | AF9 |
+| IO2 | PE2 | AF9 |
+| IO3 | PA1 | AF9 |
+
 ### STM32H743VIT6
 
 | 资源 | 数值 | 备注 |

@@ -132,8 +132,11 @@ YOLO11n FP32 (student_best.pt, mAP50=0.935)
 ### 关键约束
 
 - STM32H743：**2MB Flash, 1MB SRAM，无 NPU**
+- 外部晶振：**25MHz 无源晶振 (HSE)**
 - YOLO11n INT8 权重 2.48MB > 内部 Flash → **必须 QSPI 外部 Flash**（W25Q256 32MB）
 - QSPI Memory-Mapped @ 0x90000000，启用 D-Cache 后性能接近内部 Flash
+- QSPI 引脚：PB2(CLK), PB10(NCS), PD11(IO0), PD12(IO1), PE2(IO2), PA1(IO3)
+- W25Q256 DummyCycles=8, Fast Read=0xEB(1-4-4), FlashSize=24(32MB)
 - 初始化顺序：`MPU_Config() → SystemClock_Config(Scale=0, 480MHz) → MX_QUADSPI_Init() → SCB_EnableICache/DCache()`
 - DMA 与 D-Cache 一致性问题：`SCB_InvalidateDCache_by_Addr()` / `SCB_CleanDCache_by_Addr()` 必须 32 字节对齐
 - 常见 HardFault：QSPI 区域没配 MPU Region / Cache 在 MPU 之前开了 / DummyCycles 填错

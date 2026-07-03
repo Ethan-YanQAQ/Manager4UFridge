@@ -16,13 +16,34 @@
 
 ## 硬件方案
 
-- **主控**：STM32H743VIT6（Cortex-M7, 480MHz, 2MB Flash, 1MB SRAM）
-- **外部存储**：W25Q256 QSPI NOR Flash（32MB, Memory-Mapped @ 0x90000000）存放 YOLO 权重
-- **WiFi**：ESP-01S（AT 指令集，UART 透传）
-- **摄像头**：OV2640（DCMI 接口）
-- **传感器**：A3144 霍尔传感器（门磁）、MQ135/MQ137 气体传感器
-- **交互**：TFT 电容触控屏
-- **补光**：LED 补光灯
+| 组件 | 型号 | 关键参数 | 接口 |
+|------|------|---------|------|
+| 主控 | STM32H743VIT6 | Cortex-M7, 480MHz, 2MB Flash, 1MB SRAM, LQFP100 | — |
+| 晶振 | 无源 25MHz | HSE, 经 PLL 倍频至 480MHz | OSC_IN/OUT |
+| 外部存储 | **W25Q256JV** | 32MB NOR Flash, 133MHz, Quad SPI | QSPI @ 0x90000000 |
+| WiFi | ESP-01S | AT 指令集, TCP/HTTP 透传 | UART |
+| 摄像头 | **OV2640** | 200万像素 UXGA, 15fps, SCCB 配置 | DCMI 8-bit |
+| 门磁 | A3144 | 霍尔传感器, 开门检测 | GPIO 中断 |
+| 气体传感器 | MQ135/MQ137 | 多模态变质评估（计划中） | ADC |
+
+### QSPI 引脚分配
+
+| 信号 | 引脚 | AF |
+|------|------|-----|
+| QSPI_CLK | PB2 | AF9 |
+| QSPI_NCS | PB10 | AF9 |
+| QSPI_IO0 | PD11 | AF9 |
+| QSPI_IO1 | PD12 | AF9 |
+| QSPI_IO2 | PE2 | AF9 |
+| QSPI_IO3 | PA1 | AF9 |
+
+### 时钟配置（CubeMX）
+
+```
+HSE: 25MHz 无源晶振
+PLL1: /5 ×160 /2 = 480MHz SYSCLK
+QSPI Kernel Clock: 240MHz (HCLK3), Prescaler=1 → 120MHz SCK
+```
 
 ## 项目结构
 
