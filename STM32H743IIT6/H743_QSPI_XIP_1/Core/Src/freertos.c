@@ -26,6 +26,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "app_tasks.h"
 
 /* USER CODE END Includes */
 
@@ -88,6 +89,7 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
+  g_frame_queue = xQueueCreate(4, sizeof(uint8_t*));
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
 
@@ -96,6 +98,12 @@ void MX_FREERTOS_Init(void) {
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
+  const osThreadAttr_t cam_attr = {.name="Camera",.stack_size=1024*4,.priority=osPriorityHigh};
+  const osThreadAttr_t ai_attr  = {.name="AI",.stack_size=4096*4,.priority=osPriorityNormal};
+  const osThreadAttr_t mon_attr = {.name="Monitor",.stack_size=512*4,.priority=osPriorityLow};
+  camTaskHandle = osThreadNew(vTaskCamera, NULL, &cam_attr);
+  aiTaskHandle  = osThreadNew(vTaskAI, NULL, &ai_attr);
+  monTaskHandle = osThreadNew(vTaskMonitor, NULL, &mon_attr);
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
 
