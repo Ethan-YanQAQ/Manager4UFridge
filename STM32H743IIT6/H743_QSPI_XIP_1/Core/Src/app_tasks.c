@@ -19,7 +19,7 @@ QueueHandle_t g_frame_queue = NULL;
 
 /* AI 输入输出缓冲 (SDRAM) */
 static float *g_ai_input  = (float *)0xC0200000;   /* 320*320*3*4 = 1.2MB */
-static float *g_ai_output = (float *)0xC0300000;   /* 32*2100*4 = 263KB */
+static float *g_ai_output = (float *)0xC0400000;   /* input之后留足余量, 避免重叠 */
 
 /* 检测结果 */
 static detection_list_t g_det_result;

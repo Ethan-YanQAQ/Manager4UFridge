@@ -50,6 +50,7 @@ MEMORY
   RAM_D2 (xrw)   : ORIGIN = 0x30000000, LENGTH = 288K
   RAM_D3 (xrw)   : ORIGIN = 0x38000000, LENGTH = 64K
   ITCMRAM (xrw)  : ORIGIN = 0x00000000, LENGTH = 64K
+  SDRAM (xrw)    : ORIGIN = 0xC0000000, LENGTH = 32M
 }
 
 /* Define output sections */
@@ -151,6 +152,15 @@ SECTIONS
     _ebss = .;         /* define a global symbol at bss end */
     __bss_end__ = _ebss;
   } >RAM_D1
+
+  /* External SDRAM section (AI activations, frame buffers — not loaded, not zeroed) */
+  .sdram_data (NOLOAD) :
+  {
+    . = ALIGN(4);
+    *(.sdram_data)
+    *(.sdram_data*)
+    . = ALIGN(4);
+  } >SDRAM
 
   /* User_heap_stack section, used to check that there is enough RAM left */
   ._user_heap_stack :

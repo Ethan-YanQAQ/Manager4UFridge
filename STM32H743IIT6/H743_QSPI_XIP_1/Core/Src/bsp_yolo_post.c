@@ -48,7 +48,7 @@ int bsp_yolo_post_process(
     int input_w, int input_h)
 {
     float thr = YOLO_CONF_THRESH;
-    detection_t raw[YOLO_NOUT_CELLS];
+    static detection_t raw[YOLO_NOUT_CELLS];   /* static: ~50KB, 避免栈溢出 */
     int raw_cnt = 0;
 
     /* --- 第1步: 解码每格 → 选高于阈值的候选 --- */
@@ -87,7 +87,8 @@ int bsp_yolo_post_process(
 
     nms_sort(raw, raw_cnt);
 
-    int kept[YOLO_NOUT_CELLS] = {0};
+    static uint8_t kept[YOLO_NOUT_CELLS];       /* static: 2.1KB, 避免栈溢出 */
+    memset(kept, 0, sizeof(kept));
     for (int i = 0; i < raw_cnt && result->count < YOLO_MAX_DET; i++) {
         if (kept[i]) continue;
         result->dets[result->count++] = raw[i];

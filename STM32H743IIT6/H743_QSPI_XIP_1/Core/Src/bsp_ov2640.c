@@ -79,8 +79,11 @@ void bsp_ov2640_init(void)
     sccb_read(0x1C, &midh);
     sccb_read(0x1D, &midl);
     if (midh != 0x7F || midl != 0xA2) {
-        /* ID 不匹配 — 检查 I2C 接线 */
-        while (1) { __NOP(); }
+        /* ID 不匹配 — 检查 I2C 接线, LED 快闪报警 */
+        while (1) {
+            HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
+            HAL_Delay(100);
+        }
     }
 
     /* 批量写寄存器 */
@@ -105,10 +108,10 @@ void bsp_ov2640_stop(void)
     HAL_DCMI_Stop(&hdcmi);
 }
 
-/* --- 获取当帧缓冲区 --- */
+/* --- 获取刚完成的帧缓冲区 --- */
 uint8_t* bsp_ov2640_get_fb(void)
 {
-    return fb[1 - fb_idx];  /* 返回刚写完的那帧 */
+    return fb[1 - fb_idx];  /* 返回 DMA 刚写完的那帧 (非当前写入帧) */
 }
 
 /* --- 帧回调 --- */
@@ -117,11 +120,20 @@ void bsp_ov2640_set_frame_cb(void (*cb)(void))
     frame_callback = cb;
 }
 
-/* DCMI 帧完成中断 */
+/* DCMI 帧完成中断 — 乒乓缓冲 */
+#if !defined(TEST_PHASE_OV2640) && !defined(TEST_PHASE_OV2640_SNAPSHOT)
 void HAL_DCMI_FrameEventCallback(DCMI_HandleTypeDef *hdcmi)
 {
     /* invalidate D-Cache for the just-completed buffer */
     SCB_InvalidateDCache_by_Addr((uint32_t *)fb[fb_idx], OV2640_FRAME_SIZE);
-    fb_idx = 1 - fb_idx;
+    uint8_t *ready = fb[fb_idx];     /* 刚完成的帧 */
+    fb_idx = 1 - fb_idx;             /* 切换到另一个缓冲 */
+    /* 重启 DMA 写入另一个缓冲 (乒乓) */
+    HAL_DCMI_Stop(hdcmi);
+    HAL_DCMI_Start_DMA(hdcmi, DCMI_MODE_CONTINUOUS,
+                       (uint32_t)fb[fb_idx],
+                       OV2640_FRAME_SIZE / 4);
     if (frame_callback) frame_callback();
+    (void)ready;  /* 调用者通过 bsp_ov2640_get_fb() 获取 */
 }
+#endif

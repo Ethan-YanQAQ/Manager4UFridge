@@ -34,6 +34,15 @@
 /* USER CODE BEGIN Includes */
 #include "string.h"
 #include "stdio.h"
+
+#include "test_config.h"
+
+#ifdef TEST_PHASE_UART
+#include "test_uart.h"
+#endif
+#if defined(TEST_PHASE_OV2640) || defined(TEST_PHASE_OV2640_SNAPSHOT)
+#include "test_ov2640.h"
+#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -119,12 +128,18 @@ int main(void)
 
   /* USER CODE END 2 */
 
-  /* Init scheduler */
-  osKernelInitialize();  /* Call init function for freertos objects (in cmsis_os2.c) */
+#ifdef TEST_PHASE_UART
+  /* Phase 1: 裸机串口测试 */
+  test_uart_run();
+#elif defined(TEST_PHASE_OV2640) || defined(TEST_PHASE_OV2640_SNAPSHOT)
+  /* Phase 2: 裸机 OV2640 测试 */
+  test_ov2640_run();
+#else
+  /* Phase 3+: FreeRTOS 多任务流程 */
+  osKernelInitialize();
   MX_FREERTOS_Init();
-
-  /* Start scheduler */
   osKernelStart();
+#endif
 
   /* We should never get here as control is now taken by the scheduler */
 
@@ -198,10 +213,17 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* ── printf 重定向到 USART1（所有 Phase 通用）── */
+int _write(int fd, char *ptr, int len)
+{
+    HAL_UART_Transmit(&huart1, (uint8_t *)ptr, len, 100);
+    return len;
+}
+
 static void MPU_Config(void){
     MPU_Region_InitTypeDef M={0};
     HAL_MPU_Disable();
-    M.Enable=MPU_REGION_ENABLE; M.BaseAddress=0x90000000; M.Size=MPU_REGION_SIZE_16MB;
+    M.Enable=MPU_REGION_ENABLE; M.BaseAddress=0x90000000; M.Size=MPU_REGION_SIZE_32MB;
     M.AccessPermission=MPU_REGION_FULL_ACCESS; M.IsBufferable=MPU_ACCESS_BUFFERABLE;
     M.IsCacheable=MPU_ACCESS_CACHEABLE; M.IsShareable=MPU_ACCESS_NOT_SHAREABLE;
     M.Number=MPU_REGION_NUMBER0; M.TypeExtField=MPU_TEX_LEVEL1; M.SubRegionDisable=0x00;
