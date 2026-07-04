@@ -28,7 +28,7 @@
 | 主控 | STM32H743IIT6 | LQFP**176**, 480MHz |
 | HSE 晶振 | 无源 **25MHz** | CubeMX HSE 填 25MHz |
 | QSPI Flash | **W25Q256JV** | 32MB, 133MHz, DummyCycles=8 |
-| 摄像头 | OV2640 | UXGA 1600×1200, SCCB, DCMI 8-bit |
+| 摄像头 | **OV5640** | 5MP, 2592×1944, DVP 8-bit, SCCB @ 0x78 |
 | WiFi | ESP-01S | AT 指令, UART 透传 |
 
 ### 时钟树（CubeMX 配置）
@@ -1052,15 +1052,54 @@ X-CUBE-AI/App/
 
 ## DCMI 摄像头 + DMA
 
-### OV2640 接法
+### OV5640 接法
 
 ```
-DCMI_D0-D7   → OV2640 Y0-Y7     (8 位数据)
-DCMI_PIXCLK  → OV2640 PCLK      (像素时钟)
-DCMI_HSYNC   → OV2640 HREF      (行同步)
-DCMI_VSYNC   → OV2640 VSYNC      (帧同步)
-I2C SCL/SDA  → OV2640 SCCB       (寄存器配置)
+DCMI_D0-D7   → OV5640 Y0-Y7     (8 位数据)
+DCMI_PIXCLK  → OV5640 PCLK      (像素时钟)
+DCMI_HSYNC   → OV5640 HREF      (行同步)
+DCMI_VSYNC   → OV5640 VSYNC      (帧同步)
+I2C SCL/SDA  → OV5640 SCCB       (寄存器配置, 地址 0x78)
 ```
+
+> **OV5640 vs OV2640 关键差异**:
+> | 参数 | OV5640 | OV2640 |
+> |------|--------|--------|
+> | SCCB 地址 | **0x78** (7-bit=0x3C) | 0x60 (7-bit=0x30) |
+> | 寄存器地址 | **16-bit** | 8-bit |
+> | PID | **0x56 0x40** (reg 0x300A/B) | 0x7F 0xA2 (reg 0x1C/D) |
+> | 最大分辨率 | 2592×1944 (5MP) | 1600×1200 (2MP) |
+> | SCCB 写 | `[regH, regL, val]` 3字节 | `[reg, val]` 2字节 |
+| DVP 位宽 | **10-bit** D[9:0] | 8-bit D[7:0] |
+| 8-bit 接法 | D[9:2]→DCMI_D0~7 | D[7:0]→DCMI_D0~7 |
+
+### ST 官方 OV5640 驱动参考
+
+**来源**: `github.com/STMicroelectronics/stm32-ov5640`
+
+ST 官方驱动采用四文件架构，初始化流程为：
+```
+OV5640_Common[141] → SetResolution(4 reg) → SetPixelFormat(2 reg) → SetPolarities → EnableDVPMode
+```
+
+**关键寄存器 (ST 官方值, 2026-07-04 通过 curl 下载验证)**:
+
+| 寄存器 | ST 值 | 说明 |
+|--------|-------|------|
+| `0x300E` (MIPI_CTRL) | `0x58`→**0x18** | 先关 MIPI PHY(0x58), 流开启时写 0x18 使能 DVP |
+| `0x4300` (FORMAT_CTRL00) | **0x6F** | RGB565 格式 (非 0x61) |
+| `0x501F` (FORMAT_MUX) | **0x01** | ISP→RGB MUX (非 0x00) |
+| `0x4740` (POLARITY) | 0x22→**0x23** | PCLK=high, HREF=high, VSYNC=high |
+| `0x3017` | **0x7F** | DVP 焊盘: VSYNC+HREF+PCLK+D[9:6] |
+| `0x3018` | **0xFC** | DVP 焊盘: D[5:0] |
+| `0x503D` | **0x00** | 关 color bar (调试: 0x80 开 8 色彩条) |
+
+**OV5640_POLARITY_CTRL (0x4740) 位定义**:
+| Bit | 信号 | 0 | 1 |
+|-----|------|---|---|
+| [5] | PCLK | Active Low | Active High |
+| [1] | HREF | Active Low | Active High |
+| [0] | VSYNC | Active High | Active Low |
 
 ### 双缓冲 DMA
 
@@ -1160,7 +1199,171 @@ p/x *((uint32_t*)0xE000ED2C)  # 读 CFSR 异常原因寄存器
 
 ---
 
-## 参考资源
+## 正点原子 F767/H743 IGT6 核心板参考代码 (2026-07-04 阅读)
+
+> 来源: `Refcode/STM32F767,H743-IGT6/` — 正点原子 Apollo 开发板配套例程
+> 包含: 原理图、数据手册、65 个 HAL 库实验例程
+> 缺失: BSP 驱动库（仅包含 User 层 main.c, 驱动封装在付费 BSP 包中）
+
+### 标准初始化顺序（所有实验一致）
+
+```c
+sys_cache_enable();                    // 1. 开 L1-Cache (最先)
+HAL_Init();                            // 2. HAL 库初始化
+sys_stm32_clock_init(432,25,2,9);      // 3. 时钟: PLL/25MHz/2分频/9倍频 → 216MHz(F767)
+delay_init(216);                       // 4. 延时函数 (需要时钟频率参数)
+usart_init(115200);                    // 5. 串口 (调试输出)
+led_init();                            // 6. LED (心跳指示)
+mpu_memory_protection();               // 7. MPU 内存保护 (SDRAM 初始化之后再设)
+sdram_init();                          // 8. SDRAM 初始化
+lcd_init();                            // 9. LCD (需要 SDRAM 做帧缓冲)
+key_init();                            // 10. 按键输入
+// 然后初始化具体外设 (QSPI/I2C/DMA/摄像头等)
+```
+
+> **注意**: 正点原子把 MPU 放在 SDRAM 之后，与我们的做法（MPU 在 SDRAM 之前）不同。两种都可以：
+> - MPU 在前：Region 配置好了，外设初始化后立即生效 → 更安全
+> - SDRAM 在前：SDRAM 初始化序列发送完再配 MPU → 初始化期间无 MPU 限制
+> - 我们采用 MPU 在前的方式（见 [MPU + Cache 配置](#mpu--cache-配置)）
+
+### 变量放置在绝对地址
+
+正点原子用 ARM 编译器的 `__at` 属性，直接将变量放在 SDRAM 物理地址：
+
+```c
+// AC5 编译器 (ARM Compiler 5)
+uint16_t testsdram[250000] __attribute__((at(0xC0000000)));
+
+// AC6 编译器 (ARM Compiler 6)
+uint16_t testsdram[250000] __attribute__((section(".bss.ARM.__at_0xC0000000")));
+```
+
+比我们自己定义 `.sdram_data` 段更直接，但缺点：
+- 不同编译器语法不同（AC5 vs AC6）
+- 不支持多个分散的变量（需手动管理地址不重叠）
+- Cube.AI 自动生成的 `AI_ALIGNED` + `.sdram_data` section 方式更健壮
+
+### SDRAM 测试方法
+
+```c
+#define BANK5_SDRAM_ADDR  0xC0000000
+
+// 写入: 每 16KB 写一个递增的 uint32_t 值，共 2048 个采样点覆盖 32MB
+for (i = 0; i < 32 * 1024 * 1024; i += 16 * 1024) {
+    *(__IO uint32_t*)(BANK5_SDRAM_ADDR + i) = temp++;
+}
+
+// 读出: 读回并校验单调递增（比写固定值+比较更可靠，能发现地址线短路）
+for (i = 0; i < 32 * 1024 * 1024; i += 16 * 1024) {
+    temp = *(__IO uint32_t*)(BANK5_SDRAM_ADDR + i);
+    if (i > 0 && temp <= sval) break;  // 单调性校验失败
+}
+```
+
+> **启示**: 我们的 `SDRAM_InitSequence()` 之后应加类似的读写测试确认硬件正常。
+
+### QSPI Flash 使用模式
+
+```c
+// 1. 初始化
+norflash_init();                    // BSP 层封装: QSPI GPIO + HAL_QSPI_Init + MemoryMapped
+
+// 2. 读 ID 确认芯片在位
+id = norflash_read_id();
+while (id == 0 || id == 0xFFFF) {   // 0 或全 1 = 芯片不在位
+    LED0_TOGGLE();                   // LED 闪烁提示
+    delay_ms(500);
+}
+
+// 3. Flash 大小硬编码（W25Q256 = 32MB）
+flashsize = 32 * 1024 * 1024;
+
+// 4. 读写操作（从末尾 200 字节处开始）
+#define FLASH_ADDR  (flashsize - 200)
+norflash_write(buf, FLASH_ADDR, len);   // 写
+norflash_read(buf, FLASH_ADDR, len);    // 读
+```
+
+> **关键**: 初始化后必须读 ID 验证芯片在位，0x0000 或 0xFFFF 表示通信失败。正点原子用 `norflash_write/read` 封装了 HAL_QSPI 的 MemoryMapped 进出操作，这样写 Flash 时自动退出映射、写完后恢复映射。
+
+### DMA 使用模式
+
+```c
+dma_init(DMA2_Stream7, DMA_CHANNEL_4);          // 初始化 DMA 外设
+
+HAL_UART_Transmit_DMA(&huart, buf, len);        // 启动 DMA 传输
+
+// 等待 DMA 传输完成（轮询方式，FreeRTOS 下应改用信号量）
+while (!__HAL_DMA_GET_FLAG(&hdma, DMA_FLAG_TCIF3_7)) {
+    // 查询进度: __HAL_DMA_GET_COUNTER(&hdma) 返回剩余数据项数
+    pro = 1 - (__HAL_DMA_GET_COUNTER(&hdma) / total_len);
+}
+__HAL_DMA_CLEAR_FLAG(&hdma, DMA_FLAG_TCIF3_7);
+HAL_UART_DMAStop(&huart);                       // 停止 DMA
+```
+
+> **注意**: `__HAL_DMA_GET_COUNTER()` 返回**剩余**数据项数（不是已传输的），且单位是数据宽度（word/halfword/byte）。DCMI 场景需 ×4 转字节数。
+
+### MPU 保护设置
+
+正点原子分两层：
+1. `mpu_memory_protection()` — 设置板级默认 MPU region（SDRAM/QSPI/LCD 等）
+2. `mpu_set_protection(addr, size, rgn, ap, priv, share, cache, buffer)` — 设置单个 region
+
+典型调用：
+```c
+mpu_set_protection(
+    0x20002000,                    // 基地址
+    MPU_REGION_SIZE_128B,          // 大小
+    MPU_REGION_NUMBER0,            // Region 编号
+    MPU_REGION_FULL_ACCESS,        // 访问权限
+    MPU_REGION_PRIV_RO_URO,        // 特权/用户权限
+    MPU_ACCESS_NOT_SHAREABLE,      // 不共享
+    MPU_ACCESS_NOT_CACHEABLE,      // 不缓存
+    MPU_ACCESS_BUFFERABLE          // 可缓冲
+);
+```
+
+### 摄像头和照相机实验（实验 39、47）
+
+**该参考包中这两个实验的源代码缺失**，仅含 readme.txt 和 keilkill.bat。
+
+正点原子 OV5640 摄像头驱动通常在单独的 "增值资料" 包中，包含：
+- `BSP/OV5640/ov5640.c` — 完整的 OV5640 寄存器初始化表（200+ 寄存器）
+- `BSP/DCMI/dcmi.c` — DCMI + DMA 双缓冲配置
+- `BSP/SCCB/sccb.c` — SCCB 协议封装（16-bit 寄存器地址）
+
+> 我们参考 ArduCAM 和 ESP32-CAM 的 OV5640 初始化序列自行编写了驱动（见 bsp_ov2640.c）
+
+### 正点原子实验 vs 本项目对照
+
+| 正点原子实验 | 本项目对应 | 状态 |
+|------------|-----------|------|
+| 实验12 MPU | `main.c → MPU_Config()` | ✅ 已实现 |
+| 实验14 SDRAM | `fmc.c → SDRAM_InitSequence()` | ✅ 已实现 |
+| 实验28 QSPI | `quadspi.c → CSP_QSPI_Init()` | ✅ 已实现 |
+| 实验39 摄像头 | `bsp_ov2640.c` (OV5640) | ✅ 已实现 |
+| 实验20 DMA | DCMI DMA + USART DMA | ✅ 已实现 |
+| 实验25 IIC | OV5640 SCCB I2C | ✅ 已实现 |
+| 实验47 照相机 | `test_ov2640.c` snapshot | ✅ 已实现 |
+| 实验40 内存管理 | 链接脚本 .sdram_data 段 | ✅ 已实现 |
+
+### 原理图参考
+
+> 原理图路径: `Refcode/STM32F767,H743-IGT6/1，原理图/`
+
+正点原子核心板关键引脚（IGT6 LQFP176 封装）：
+
+| 功能 | 正点原子核心板 | 本项目 | 差异 |
+|------|--------------|--------|------|
+| QSPI | PB2(CLK), PB6(NCS), PD11-12, PE2, PA1 | PB2(CLK), **PB10**(NCS), PD11-12, PE2, PA1 | NCS 不同 |
+| SDRAM | FMC Bank1 标准引脚 | 同 | — |
+| DCMI | 标准 OV5640 8-bit 映射 | 同 | — |
+| USART1 | PA9(TX), PA10(RX) | **PB14**(TX), **PB15**(RX) | 不同 |
+| I2C1 | PB6(SCL), PB7(SDA) | 同 | — |
+| LED | PB0, PF7 等 | PB0 | 相同 |
+
+> **警告**: USART1 和 QSPI NCS 引脚与正点原子核心板不同，烧录正点原子例程前须修改引脚配置。
 
 | 资源 | 链接 |
 |------|------|
@@ -1171,4 +1374,169 @@ p/x *((uint32_t*)0xE000ED2C)  # 读 CFSR 异常原因寄存器
 | STM32 AI Model Zoo | github.com/STMicroelectronics/stm32ai-modelzoo |
 | 安富莱(硬汉)论坛 | forum.anfulai.cn — H7 实战帖多 |
 | 本项目 Cube.AI 指南 | `miniapp/STM32_to_Cloud.md` |
+
+---
+
+## 🐞 硬件调试过程 (2026-07-04)
+
+> 工程: `STM32H743IIT6/IITx6/`
+> 板子: STM32H743IIT6 + W25Q256 + W9825G6KH + OV5640 + ESP-01S
+> 策略: 每步一个独立验证点, 通过后进入下一步, 避免多变量同时调试
+
+### STEP 0 — 工程编译通过
+
+**目标**: CubeMX 生成 + 自定义代码, 编译 0 错误 0 警告
+
+- [ ] CubeMX 界面配好 HSE(25MHz Crystal) + PLL(480MHz) + HCLK(240MHz)
+- [ ] 所有外设引脚确认与硬件一致
+- [ ] 自定义文件加入工程 (bsp_*, app_tasks, test_*)
+- [ ] `arm-none-eabi-gcc` 编译通过
+- [ ] 链接脚本含 SDRAM + `.sdram_data`
+
+### STEP 1 — FreeRTOS 启动 + 串口 printf
+
+**目标**: 确认 MCU 跑起来, 时钟正确, 调度器正常运行
+
+- [ ] 烧录后串口有 `printf` 输出 (115200/8/N/1)
+- [ ] 打印 SYSCLK=480MHz, HCLK=240MHz (确认时钟配置)
+- [ ] LED PB0 每 500ms 翻转一次 (确认调度器在跑)
+- [ ] 串口回环正常 (敲键盘有回应)
+
+**激活**: `test_config.h` → `#define TEST_PHASE_UART`
+
+**验证点**:
+```
+╔══════════════════════════╗
+║  Manager4UFridge  UART  ║
+╚══════════════════════════╝
+MCU:   STM32H743IIT6
+UID:   XXXXXXXX-XXXXXXXX-XXXXXXXX
+SYSCLK: 480 MHz
+USART1: 115200 bps
+[ECHO] ...
+```
+
+### STEP 2 — 门磁 EXTI 中断
+
+**目标**: 确认 PG9 门磁 GPIO EXTI 工作
+
+- [ ] 开门 → 串口出 `[DOOR] OPEN`
+- [ ] 关门 → 串口出 `[DOOR] CLOSE`
+- [ ] 回调函数被正确调用
+
+**激活**: FreeRTOS 模式下 `vTaskMonitor` 任务体的 `#if 1`
+**文件**: `app_tasks.c` → `vTaskMonitor()`
+
+### STEP 3 — OV5640 I2C 通信 (软 I2C)
+
+**目标**: 确认软 I2C 能读到 OV5640 PID
+
+- [ ] `sccb_read(0x300A)` 返回 0x56
+- [ ] `sccb_read(0x300B)` 返回 0x40
+- [ ] PID 校验通过, 不进入死循环
+
+**调试技巧**: 如果死循环(LED快闪), 用逻辑分析仪/示波器看 PB3/PB4 波形:
+- SCL 是否有 100kHz 方波
+- SDA 是否有数据变化
+- 检查 PB3/PB4 是否被 CubeMX 配置为其他功能
+
+**文件**: `bsp_ov5640.c` → `bsp_ov5640_init()`
+
+### STEP 4 — OV5640 出图 (DCMI + DMA)
+
+**目标**: 确认 DCMI DMA 能采集到有效帧数据
+
+- [ ] DCMI DMA 双缓冲无溢出
+- [ ] 帧大小 = 153600 bytes (320×240×2 RGB565)
+- [ ] JPEG 头验证通过 (0xFF 0xD8) 如果启用 JPEG
+- [ ] 或: 测试图案模式 (0x503D=0x80) 看到 8 色彩条
+
+**调试技巧**:
+- 先写 0x503D=0x80 开 color bar, 跳过镜头对准问题
+- 如果 DCMI_D0-D7 接了 OV5640 D[9:2], 确认高 8 位对齐
+
+**文件**: `bsp_ov5640.c` → `bsp_ov5640_start()`, `app_tasks.c` → `vTaskCamera()`
+
+### STEP 5 — SDRAM 读写测试
+
+**目标**: 确认外部 SDRAM 正常
+
+- [ ] 写入 0xC0000000 递增模式
+- [ ] 读出校验通过 (单调递增检查)
+- [ ] 全 32MB 无坏点
+
+**测试代码** (在 `main.c` → `USER CODE 2` 中插入):
+```c
+uint32_t temp = 0;
+for (uint32_t i = 0; i < 32*1024*1024; i += 16*1024) {
+    *(__IO uint32_t*)(0xC0000000 + i) = temp++;
+}
+temp = 0;
+for (uint32_t i = 0; i < 32*1024*1024; i += 16*1024) {
+    uint32_t v = *(__IO uint32_t*)(0xC0000000 + i);
+    if (i > 0 && v <= *(volatile uint32_t*)(0xC0000000 + i - 16*1024)) {
+        printf("[FAIL] SDRAM at 0x%08X\r\n", (unsigned)(0xC0000000 + i));
+        break;
+    }
+}
+printf("[OK] SDRAM 32MB passed\r\n");
+```
+
+### STEP 6 — QSPI Flash 读写测试
+
+**目标**: 确认 W25Q256 正常工作
+
+- [ ] `norflash_read_id()` 返回有效 ID (非 0x0000 或 0xFFFF)
+- [ ] Memory-Mapped 模式: 读 0x90000000 不 HardFault
+- [ ] 写→读校验通过
+
+### STEP 7 — Cube.AI 推理单次
+
+**目标**: 确认 YOLO11n 能成功加载并推理一次
+
+- [ ] `bsp_ai_init()` 返回 0 (网络创建成功)
+- [ ] 用随机/固定输入数据调用 `bsp_ai_run()`, 返回 1 (batch=1)
+- [ ] 输出 tensor 非全零
+
+**文件**: `bsp_ai.c` → `bsp_ai_init()` / `bsp_ai_run()`
+
+### STEP 8 — 全链路: 门→拍照→推理→输出
+
+**目标**: 端到端验证
+
+- [ ] 开门触发 → DCMI 拍照 → 预处理 → AI 推理 → NMS → 串口出 `[DET]`
+- [ ] 检测结果可读 (class_id + score + bbox)
+
+**激活**: FreeRTOS 模式, 三个任务全部 `#if 1`
+**文件**: `app_tasks.c` → 全部任务
+
+---
+
+### 当前状态
+
+| STEP | 状态 | 备注 |
+|------|:----:|------|
+| 0 编译 | 🔧 | Post-gen 修复完成, 待编译验证 |
+| 1 串口 | 📋 | TEST_PHASE_UART 已激活 |
+| 2 门磁 | 📋 | |
+| 3 I2C | 📋 | 软 I2C PB3/PB4 |
+| 4 摄像头 | 📋 | |
+| 5 SDRAM | 📋 | |
+| 6 QSPI | 📋 | 引脚待确认 |
+| 7 AI | 📋 | network.c 未生成 |
+| 8 全链路 | 📋 | |
+
+### STEP 0 已完成的 Post-Gen 修复
+
+| 文件 | 修改 |
+|------|------|
+| `main.c` | HCLK DIV4→DIV2, FLASH_LATENCY 1→4 |
+| `main.c` | 初始化顺序: HAL→Clock→外设→MPU→Cache→SDRAM |
+| `main.c` | MPU: 默认→QSPI(32MB,exec) + SDRAM(32MB,no-exec) |
+| `main.c` | 添加 SDRAM_InitSequence() + printf 重定向 |
+| `main.c` | QSPI/AI init 注释掉 (STEP 6/7 再启用) |
+| `main.c` | 添加 test phase 分支 (UART / OV5640 / FreeRTOS) |
+| `fmc.c` | ColumnBits 8→9 |
+| `quadspi.c` | GPIO Speed LOW→VERY_HIGH |
+| `FLASH.ld` | SDRAM 32M + `.sdram_data (NOLOAD)` 段 |
 | 本项目模型训练 | `YOLOv8forSTM/` 及 `v6_results/` |
