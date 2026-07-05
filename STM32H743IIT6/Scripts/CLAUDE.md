@@ -26,7 +26,7 @@
   PA15 - RST (GPIO Output, 低有效)
   PD7  - PWDN (GPIO Output, 低有效)
 
-FMC SDRAM (W9825G6KH 32MB, Bank 1 → 0xC0000000):
+FMC SDRAM (W9825G6KH 32MB, 保持野火配置 Bank2/0xD0000000):
   PF0-5,PF12-15,PG0-2  - A0-A12
   PD14-15,PD0-1,PE7-15,PD8-10 - D0-D15
   PG4-5  - BA0-BA1
@@ -65,28 +65,21 @@ FMC SDRAM (W9825G6KH 32MB, Bank 1 → 0xC0000000):
 - 添加 `OV5640_WriteFW` 空桩 (AF 模块引用)
 - `Delay()` → NOP 循环
 
-### bsp_sdram.h — SDRAM Bank1 适配
+### bsp_sdram.h — 仅改 CS/CKE 引脚
 
 | 宏 | 野火 | 我们 |
 |------|------|------|
 | FMC_CS (SDNE0) | PH6 | **PC2** |
 | FMC_CKE (SDCKE0) | PH7 | **PC3** |
-| FMC_BANK_SDRAM | Bank2 | **Bank1** |
-| FMC_COMMAND_TARGET | BANK2 | **BANK1** |
-| SDRAM_BANK_ADDR | 0xD0000000 | **0xC0000000** |
 
-### bsp_sdram.c — SDBank 修正
-
-- `hsdram1.Init.SDBank`: `FMC_SDRAM_BANK2` → `FMC_SDRAM_BANK1`
-
-### bsp_lcd.h — 帧缓冲地址修正
-
-- `LCD_FB_START_ADDRESS`: `0xD0000000` → `0xC0000000`
+Bank/地址保持野火原样（Bank2, 0xD0000000），未动。
 
 ### main.c
 
 - 注释 `I2CMaster_Init()` — 软 SCCB 不需要硬件 I2C
 - 注释 `OV5640_AUTO_FOCUS()` — 摄像头模组无自动对焦
+- 替换 `CAMERA_DEBUG` 为 `printf` 分步输出：[1/5] HW Init → [2/5] Read ID → [3/5] RGB565 → [4/5] DCMI+DMA → [5/5] Done
+- 错误时打印明确提示：`Check PB3/PB4 SCCB wiring`
 
 ### bsp_i2c.c
 
