@@ -12,7 +12,7 @@ Release/
 *.list
 
 # ===== STM32CubeIDE / CubeMX =====
-.settings/
+**/.settings/
 .cproject
 .mxproject
 .project
