@@ -19,6 +19,8 @@ Release/
 *.launch
 **/Drivers/CMSIS/
 *.stldr
+**/.clangd
+**/.clangd/
 
 # ===== Node / 小程序 =====
 **/node_modules/
@@ -49,6 +51,7 @@ Phase_0/st_yolo_lc_v1/
 # ===== 外部参考工程 =====
 H743_QSPI_REF/
 Refcode/
+STM32H743IIT6/Scripts/
 
 # ===== 临时文件 =====
 {AEC0BD37-C609-48A0-B56B-389194DA71B1}.png
