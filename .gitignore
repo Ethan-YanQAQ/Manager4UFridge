@@ -51,6 +51,8 @@ Phase_0/st_yolo_lc_v1/
 # ===== 外部参考工程 =====
 H743_QSPI_REF/
 Refcode/
+H743/RefCodes/
+H743/39_backup*/
 STM32H743IIT6/Scripts/
 
 # ===== 临时文件 =====
