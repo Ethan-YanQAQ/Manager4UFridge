@@ -36,14 +36,55 @@ python3 ssh_server.py "<remote command>"
 
 ### STM32 固件
 
-开发环境：STM32CubeMX（独立版）+ VS Code + arm-none-eabi-gcc + STM32 for VSCode 插件。
+**开发环境**：Keil MDK (ARM Compiler 5/6)，基于正点原子 H743 例程模板。
 
-```bash
-# CubeMX 打开 .ioc → 配引脚/QSPI → X-CUBE-AI 加载模型 → 生成代码
-# VS Code 打开工程 → 写业务逻辑 → Build → Flash
+**基础模板**：[39/](39/) — 正点原子 OV5640 + DCMI + LCD 摄像头例程，已编译通过。
+
+**参考例程**：[RefCodes/【正点原子】阿波罗STM32H743开发板/](RefCodes/【正点原子】阿波罗STM32H743开发板/) — 完整 64 个 HAL 例程（包含 QSPI/SDRAM/MPU 等）。
+**驱动备份**：[Scripts/](Scripts/) — 从 RefCodes 提取的关键实验驱动代码（QSPI/SDRAM/MPU/LTDC_LCD/USMART 等 9 个）。
+
+#### 硬件确认
+
+- 自制 H743 板卡与正点原子"阿波罗 H743 开发板"非常相似
+- **SDRAM、串口、DCMI 引脚与正点原子一致** → 正点原子 BSP 驱动无需修改
+- 系统时钟保持 400MHz（已验证可靠）
+
+#### 工作流程铁律
+
+1. **main.c 只做调用，不做定义** — 原有代码原封不动，仅新增 `glue_run()` 一行调用
+2. **不修改已有驱动** — `Drivers/BSP/`、`Drivers/SYSTEM/`、`Middlewares/` 下的代码保持原样
+3. **所有新功能写入独立模块** — `User/module_xxx.c/h`，include 已有驱动头文件即可
+4. **胶水脚本实现分步调试** — `User/glue.c/h` 串联模块，`#define STEP_DEBUG` 宏控制分步/全速模式
+
+#### 工程结构
+
+```
+39/
+├── Drivers/BSP/              ← [不改] 正点原子驱动 (DCMI/LCD/SDRAM/OV5640/KEY/LED/MPU...)
+├── Drivers/SYSTEM/           ← [不改] 系统组件 (delay/sys/usart)
+├── Drivers/STM32H7xx_HAL_Driver/ ← [不改] HAL 库
+├── Middlewares/USMART/       ← [不改] 串口调试工具
+├── User/
+│   ├── main.c               ← [最小改动] 只新增 glue_run() 调用
+│   ├── glue.c/h             ← [新增] 胶水脚本，模块级联 + STEP_DEBUG
+│   ├── module_qspi.c/h      ← [新增] QSPI/W25Q256 功能模块
+│   ├── module_wifi.c/h      ← [新增] ESP-01S WiFi 功能模块
+│   └── ...
+└── Projects/                 ← [不改] Keil 工程文件
 ```
 
-QSPI 参考工程在 `H743_QSPI_REF/`，已通过代理克隆成功。
+#### 39/ main.c 关键信息
+
+| 项目 | 值 |
+|------|-----|
+| 系统时钟 | 400MHz (`sys_stm32_clock_init(160,5,2,4)`) |
+| SDRAM 基址 | 0xC0000000, 32MB |
+| LCD 帧缓冲 | SDRAM 低 1280×800×2 区域 |
+| JPEG 帧缓冲 | 0xC01F4000 (1MB，在 LCD 帧缓冲之后) |
+| 调试串口 | USART1 (PA9/PA10, 115200) |
+| JPEG 输出串口 | USART2 (PA2/PA3, 921600) |
+| DCMI DMA | DMA1_Stream1, 双缓冲循环模式 |
+| 核心回调 | `dcmi_rx_callback` 函数指针 (运行时切换 RGB/JPEG)
 
 ### 代理配置
 
@@ -80,17 +121,14 @@ CubeMX 需单独在 UI 中配代理：`Help → Updater Settings → Connection 
 │  datasets/fridge_v6/: 28类, 13,018图(已解压本地)   │
 └─────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────┐
-│  H743/H743VIT6_test/  （STM32 固件）              │
-│  Core/Src/main.c    — 入口，ESP-01S WiFi 初始化   │
-│  Core/Src/esp01s.c  — AT 指令驱动（UART 透传）    │
-│  Core/Inc/esp01s.h  — ESP01S_HandleTypeDef 接口   │
-│  计划加入：QSPI + DCMI + X-CUBE-AI 推理           │
-└─────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────┐
-│  H743_QSPI_REF/  （QSPI Memory-Mapped 参考工程）   │
-│  Memory Mapped Mode/H743_QSPI_XIP_1.ioc  — CubeMX │
-│  Memory Mapped Mode/Core/Src/quadspi.c  — 驱动    │
-│  Example1/Core/Src/w25qxx_qspi.c  — W25Qxx 驱动   │
+│  39/  （STM32 固件 — 基于正点原子模板）             │
+│  User/main.c        — 入口，仅新增 glue_run()      │
+│  User/glue.c/h      — 胶水脚本 + STEP_DEBUG       │
+│  User/module_qspi.c/h  — QSPI/W25Q256            │
+│  User/module_wifi.c/h  — ESP-01S WiFi AT 驱动     │
+│  Drivers/BSP/       — [不改] 正点原子 BSP 驱动     │
+│  RefCodes/          — 完整 64 个 HAL 参考例程       │
+│  计划加入：X-CUBE-AI 推理 (YOLO11n INT8)           │
 └─────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────┐
 │  miniapp/  （微信小程序）                          │
@@ -118,16 +156,6 @@ CubeMX 需单独在 UI 中配代理：`Help → Updater Settings → Connection 
 | Teacher | YOLO11l | 25M | **0.958** | 8.1ms |
 | Student | YOLO11n | 2.6M | **0.935** | 1.7ms |
 
-### 模型部署方案
-
-```
-YOLO11n FP32 (student_best.pt, mAP50=0.935)
-    → ONNX 导出
-    → X-CUBE-AI INT8 量化（~2.48MB 权重）
-    → QSPI Flash Memory-Mapped 存储 @ 0x90000000
-    → Cube.AI 生成 C 推理代码
-    → STM32H743 Cortex-M7 @ 480MHz 本地推理
-```
 
 ### 关键约束
 
@@ -135,34 +163,6 @@ YOLO11n FP32 (student_best.pt, mAP50=0.935)
 - 外部晶振：**25MHz 无源晶振 (HSE)**
 - YOLO11n INT8 权重 2.48MB > 内部 Flash → **必须 QSPI 外部 Flash**（W25Q256 32MB）
 - QSPI Memory-Mapped @ 0x90000000，启用 D-Cache 后性能接近内部 Flash
-- QSPI 引脚：PB2(CLK), PB10(NCS), PD11(IO0), PD12(IO1), PE2(IO2), PA1(IO3)
-- W25Q256 DummyCycles=8, Fast Read=0xEB(1-4-4), FlashSize=24(32MB)
-- 初始化顺序：`MPU_Config() → SystemClock_Config(Scale=0, 480MHz) → MX_QUADSPI_Init() → SCB_EnableICache/DCache()`
-- DMA 与 D-Cache 一致性问题：`SCB_InvalidateDCache_by_Addr()` / `SCB_CleanDCache_by_Addr()` 必须 32 字节对齐
-- 常见 HardFault：QSPI 区域没配 MPU Region / Cache 在 MPU 之前开了 / DummyCycles 填错
-
-### 开发环境
-
-| 需求 | 工具 |
-|------|------|
-| Python | conda env `fridge_ai`, Python 3.10, ultralytics 8.4.60 |
-| 本地 GPU | RTX 4060 Laptop 8GB VRAM, CUDA 12.1 |
-| 远程 GPU | RTX 3080 10G @ 223.109.239.36:10220（备用） |
-| STM32 配置 | STM32CubeMX（独立版）+ X-CUBE-AI 插件 |
-| STM32 编码 | VS Code + arm-none-eabi-gcc + STM32 for VSCode |
-| 3D 建模 | Fusion 360（个人版免费）|
-| 微信小程序 | HBuilderX + 微信开发者工具 |
-
-## 关键文件索引
-
-| 文件 | 内容 |
-|------|------|
-| `stm32h7notes.md` | STM32H7 开发笔记：MPU/Cache/QSPI/Cube.AI/HardFault 速查 |
-| `task_plan.md` | 全项目分阶段计划（Phase 1-12）|
-| `findings.md` | 研究记录：训练/数据集/ST YOLO/量化/部署预研 |
-| `progress.md` | 开发会话日志 |
-| `miniapp/STM32_to_Cloud.md` | STM32 → ESP8266 → 云函数对接指南 |
-| `H743_QSPI_REF/Memory Mapped Mode/` | QSPI XIP 参考 .ioc + quadspi.c |
 
 ## 关键约束
 
@@ -171,3 +171,4 @@ YOLO11n FP32 (student_best.pt, mAP50=0.935)
 - 推送前确保无 >100MB 文件（GitHub 硬限制）
 - STM32CubeMX crdb.zip 下载失败需配代理 `Help → Updater Settings → Manual → http://127.0.0.1:33210`
 - git clone 需要配代理 `export https_proxy=http://127.0.0.1:33210`
+- ⚠️ **QSPI 引脚待确认**：阿波罗 H743 用 PB6/PF6-9，但我们板子实际走线需实地测量
