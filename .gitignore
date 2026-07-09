@@ -86,3 +86,5 @@ preferredSkills.md
 # ===== 含敏感信息的脚本 =====
 YOLOv8forSTM/ssh_server.py
 H743/HWparameters/
+Phase_0/pc_tools/frames/
+Phase_0/pc_tools/test_frames/
